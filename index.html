@@ -970,7 +970,7 @@ void main(){
     vis = on ? 1.0 : 0.0;
   } else if(isWire){
     // a thin thing: one long stroke along its real 3D centre line, kept to the part that can be seen
-    int b0 = -1, b1 = -2, r0 = -1; vec3 lc = vec3(0.0); float lw = 0.0;
+    int b0 = -1, b1 = -2, r0 = -1; vec3 lc = vec3(0.0); float lw = 0.0, cDiff = 0.0;
     float tolZ = 1.2*vInfo.z + 0.008;                     // its own thickness, no more: anything nearer HIDES it
     // a pole with real width is modelled ACROSS it like any form: its light side, the core of its shadow and the
     // reflected light on its far side (three values across the stroke, as the graded modelling strokes have)
@@ -984,8 +984,11 @@ void main(){
       bool seen = c.w > 0.05 && q.x>0.0 && q.x<1.0 && q.y>0.0 && q.y<1.0 && (d.a < 0.5 || c.w <= d.b*uDepthRange + tolZ + 0.0015*c.w);
       if(seen){ if(r0 < 0) r0 = i; if(i - r0 > b1 - b0){ b0 = r0; b1 = i; } } else r0 = -1;
       vec4 dT = texture2D(tThinD, q);
-      if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < tolZ){
-        vec4 cc = texture2D(tThinC, q); lc += cc.rgb*(0.4+0.6*cc.a); lw += 1.0;   // its own colour, from its own picture (rtThin)
+      if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < max(tolZ, 2.2*vInfo.z + 0.008)){   // (a wide piece's surface is far from its centre line: the chimney)
+        vec4 cc = texture2D(tThinC, q); lc += cc.rgb*(0.7+0.3*cc.a); lw += 1.0;   // its own colour (mostly its material; light comes from the profile)
+        float lOwn = dot(cc.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cc.a);
+        vec4 bC = texture2D(tColor, q); float lBg = d.a > 0.5 ? dot(bC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*bC.a) : 0.85;
+        cDiff += lOwn - lBg;                               // how it differs from what is behind it (the surfaces are painted without it)
         if(i % 2 == 0){
           float hwE = 0.7*vInfo.z*uFocal/max(c.w, 0.05);
           for(int j=0;j<3;j++){
@@ -1012,6 +1015,10 @@ void main(){
       tc = ((pa+pb)*0.5/uRes)*2.0-1.0;
       amount = 0.9*uCables; vis = 1.0;
       if(uFadeR > 0.0 && vPos.y <= uFadeY) amount *= 1.0 - smoothstep(0.70, 1.0, length(vPos.xz - uFadeC)/uFadeR);   // (lines on the ground fade with it: no lone dashes)
+      // a thin thing like what is behind it (a plank on its roof) needs no line: that colour is painted already. A lighter
+      // one (a white frame on a blue wall) is RESERVED in the strokes behind it (STROKE_FS/WET_FS) and gets its own
+      // light colour here; a darker one (lattice, cable) is painted on top
+      if(lw > 0.5) amount *= smoothstep(0.05, 0.13, abs(cDiff/lw));
       vec3 own = lw > 0.5 ? lc/lw : vec3(0.08);           // (too thin to show in the reference: a dark line, like a cable against the sky)
       bool formed = pn > 0.5 && hw > 2.2*uK;
       if(formed){                                          // wide enough to show its form: graded across (a cable stays one line)
@@ -1020,7 +1027,8 @@ void main(){
         ramp = vec4(clamp(-log(clamp(lum3(pr0), 0.03, 1.0))/Am, 0.35, 1.6), clamp(-log(clamp(lum3(pr1), 0.03, 1.0))/Am, 0.35, 1.6), 1.0,
                     clamp(-log(clamp(lum3(pr2), 0.03, 1.0))/Am, 0.35, 1.6));
       }
-      col = harmonise(-log(clamp(own, 0.03, 1.0)))*1.15 + uShadow*0.6 + vec3(0.12);   // a fine line: a firm dark accent
+      float dk = smoothstep(0.45, 0.20, dot(own, vec3(0.2126,0.7152,0.0722)));   // (only a dark thing gets the firm dark accent)
+      col = harmonise(-log(clamp(own, 0.03, 1.0)))*mix(1.0, 1.15, dk) + (uShadow*0.6 + vec3(0.12))*dk + uShadow*0.15*(1.0-dk);   // a fine line
       if(formed) col = harmonise(-log(clamp(own, 0.03, 1.0)))*1.05 + uShadow*0.15;  // a rod, a rib, a pole: its OWN colour; its light and shade come from the profile
     }
   } else {
@@ -1210,7 +1218,9 @@ void main(){
     float sP = hasShape(e0) > 0.5 ? (Pw > 0.5 ? Ps/Pw : s0) : s;   // the light of the plane the brush is on (averaged over that plane only)
     float lit = smoothstep(0.55,0.85,sP);
     float roundF = smoothstep(0.012, 0.030, length(Gl/max(Gw,1e-3))*h);   // the light turns steadily across it: a round form
-    float shade = inShade(sP), ht = (1.0-smoothstep(0.45, 0.72, sP))*(1.0-shade)*hasShape(e0)*(1.0-roundF);   // only FLAT planes clearly turned away (a round form is modelled by the graded glaze)
+    float shade = inShade(sP), ht = (1.0-smoothstep(0.45, 0.72, sP))*(1.0-shade)*hasShape(e0)*(1.0-roundF);
+    float paleK = smoothstep(0.12, 0.60, lumA)*(1.0-smoothstep(0.25, 0.6, sat));   // (a white or pale material: in half light it still reads white)
+    ht *= mix(1.0, 1.0 - smoothstep(0.15, 0.35, sP), paleK);   // only FLAT planes clearly turned away (a round form is modelled by the graded glaze)
     col = Ab;
     if(layer<0.5){                                        // tea: a pale wash, interrupted by the lights
       amount = 0.42*(1.0-hiAmt*lit*(1.0-cutIn))*mix(1.0,1.25,uDetail);   // on a detailed model the first wash carries each face's colour
@@ -1295,10 +1305,11 @@ const STROKE_VS = `
 precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
-uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform float uCut;
-varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp;
+uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut;
+varying vec2 vLum;
+varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
-#define CULL { gl_Position = vec4(2.0,2.0,2.0,1.0); vQ=vec2(0.0); vCol=vec4(0.0); vP=vec3(0.0,0.0,2.0); vSeed=0.0; vWob=0.0; vRamp=vec4(1.0,0.0,0.0,0.0); vTr=vec2(0.0); vDis=0.0; vThin=0.0; vShp=vec3(0.0); return; }
+#define CULL { gl_Position = vec4(2.0,2.0,2.0,1.0); vQ=vec2(0.0); vCol=vec4(0.0); vP=vec3(0.0,0.0,2.0); vSeed=0.0; vWob=0.0; vRamp=vec4(1.0,0.0,0.0,0.0); vTr=vec2(0.0); vDis=0.0; vThin=0.0; vShp=vec3(0.0); vRes=0.0; vLum=vec2(0.0); return; }
 void main(){
   ivec2 tx = ivec2(int(mod(aIdx,uS)), int(floor(aIdx/uS)));
   vec4 a = texelFetch(tS0,tx,0), b = texelFetch(tS1,tx,0), c = texelFetch(tS2,tx,0);
@@ -1342,13 +1353,25 @@ void main(){
   float cutOn = uCut*step(0.25, eM.z)*((layer > 0.5 && layer < 1.5) || (layer > 1.5 && layer < 2.5 && vRamp.z > 0.5) ? 1.0 : 0.0);
   if(layer > 1.5 && layer < 2.5 && vRamp.z < 0.5) cutOn = 2.0*uCut;   // the shadow passage: cut to the SHADE (it stops where the light starts)
   vShp = vec3(eM.zw, cutOn);
+  vRes = (layer > 4.5 && layer < 5.5) ? 0.0 : 1.0;       // every stroke but a thin thing's own line keeps off the lighter thin things
+  { vec4 cM = texture2D(tLitS, (a.xy + arcOff(a.z, a.w, 0.5*(s0+s1)))/uRes);
+    vLum = vec2(dot(cM.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cM.a), step(0.25, eM.z)*vRes); }   // (its own value, for painting around lighter things)
 }`;
 
 // one brush mark into its glaze's wash buffer: rgb = pigment x amount x paint, a = paint (water) — merged later
 const STROKE_FS = `
 precision highp float;
-varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp;
-uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform vec2 uRes;
+varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
+uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes;
+// a LIGHTER thin thing in front (a white frame on a blue wall) is reserved: watercolour cannot paint white over blue
+float reserveAt(vec2 q){
+  vec4 tD = texture2D(tThinDS, q); if(tD.a < 0.5) return 0.0;
+  vec4 mD = texture2D(tDataS, q); if(mD.a > 0.5 && tD.b > mD.b + 0.002) return 0.0;
+  vec4 tC = texture2D(tThinCS, q), mC = texture2D(tLitS, q);
+  float lt = dot(tC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*tC.a);
+  float lm = mD.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*mC.a) : 0.85;
+  return smoothstep(0.05, 0.13, lt - lm);
+}
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 float vn(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);
   return mix(mix(hash12(i),hash12(i+vec2(1,0)),u.x), mix(hash12(i+vec2(0,1)),hash12(i+vec2(1,1)),u.x), u.y); }
@@ -1361,6 +1384,14 @@ void main(){
   float tf = vTr.y > 0.01 ? clamp((vTr.x - (1.0 - vTr.y))/max(vTr.y, 1e-3), 0.0, 1.0) : 0.0;
   float soft = mix(mix(0.06, 0.40, vP.x), 0.6, max(tf, vDis));
   float a = 1.0 - smoothstep(1.0-soft, 1.0, r);
+  if(vRes > 0.5) a *= 1.0 - reserveAt(gl_FragCoord.xy/uRes)*(1.0 - clamp(vTr.x, 0.0, 1.0));
+  if(vLum.y > 0.5){                                      // LIGHTS ARE RESERVED: a stroke paints around another object that is clearly lighter
+    vec2 uvp = gl_FragCoord.xy/uRes; vec4 eP = texture2D(tShapeS, uvp);
+    if(eP.z >= 0.25 && abs(eP.z - vShp.x) + abs(eP.w - vShp.y) > 7e-4){
+      vec4 mP = texture2D(tLitS, uvp); float lp = dot(mP.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*mP.a);
+      a *= 1.0 - smoothstep(0.12, 0.22, lp - vLum.x)*(1.0 - clamp(vTr.x, 0.0, 1.0));
+    }
+  }
   if(vShp.z > 1.5){                                      // a shadow is a shape: paint where there is shade, on the model
     float sh = 0.0;
     for(int k=0;k<4;k++){
@@ -1415,7 +1446,7 @@ const planMat = new THREE.ShaderMaterial({
   vertexShader:PLAN_VS, fragmentShader:PLAN_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending
 });
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, uCut:{value:1} },
+  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -1672,6 +1703,15 @@ vec3 octDec(vec2 e){ e = e*2.0-1.0; vec3 n = vec3(e, 1.0-abs(e.x)-abs(e.y)); flo
   n.x += n.x >= 0.0 ? -t : t; n.y += n.y >= 0.0 ? -t : t; return normalize(n); }
 float mv(float s, float cst){ float sh = 1.0-smoothstep(0.05, 0.14, s); return (sh + 0.18*(1.0-smoothstep(0.30, 0.70, s))*(1.0-sh))*(1.0 + 0.45*cst); }
 float hashW(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+uniform sampler2D tThinC; uniform sampler2D tThinD;
+float resW(vec2 q){                                       // (the reserved lights of thin things: no paint flows into them)
+  vec4 tD = texture(tThinD, q); if(tD.a < 0.5) return 0.0;
+  vec4 mD = texture(tData, q); if(mD.a > 0.5 && tD.b > mD.b + 0.002) return 0.0;
+  vec4 tC = texture(tThinC, q), mC = texture(tColor, q);
+  float lt = dot(tC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*tC.a);
+  float lm = mD.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*mC.a) : 0.85;
+  return step(0.09, lt - lm);
+}
 void main(){
   vec4 d0 = texture(tData, vUv), e0 = texture(tShape, vUv); vec3 g0 = sqrt(texture(tColor, vUv).rgb);
   vec4 f0 = uFirst > 0.5 ? vec4(1.0) : texture(tF, vUv);
@@ -1681,7 +1721,7 @@ void main(){
   float nW = mix(mix(hashW(gi), hashW(gi+vec2(1.0,0.0)), gf.x), mix(hashW(gi+vec2(0.0,1.0)), hashW(gi+vec2(1.0,1.0)), gf.x), gf.y);
   float ang = (nW - 0.5)*0.9; vec2 stp = mat2(cos(ang), sin(ang), -sin(ang), cos(ang))*uStep;
   for(int side=-1; side<=1; side+=2){                   // the paint flows out each way until it meets a border
-    float zp = d0.b*uDR, cp = d0.g; vec3 np = octDec(e0.xy); float okA = d0.a, okB = d0.a;
+    float zp = d0.b*uDR, cp = d0.g; vec3 np = octDec(e0.xy); float r0w = 1.0 - resW(vUv), okA = d0.a*r0w, okB = d0.a*r0w;
     for(int k=1;k<=4;k++){
       vec2 q = vUv + stp*float(side*k);
       vec4 d = texture(tData, q), e = texture(tShape, q); vec3 n = octDec(e.xy);
@@ -1694,7 +1734,7 @@ void main(){
       // light and shade are not in this colour, so the shades of one colour still blend)
       float sameCol = 1.0 - smoothstep(0.10, 0.20, length(sqrt(texture(tColor, q).rgb) - g0));
       float cont = d.a*max(same*step(0.80, dot(n, np))*sameCol, alike)*(1.0-step(0.15, abs(d.b*uDR-zp)));
-      okA *= cont;
+      float rq = 1.0 - resW(q); okA *= cont*rq;
       float dmv = abs(mv(texture(tColor, q).a, d.g)-mv(texture(tColor, vUv).a, d0.g));
       float band = 1.0-step(0.12, dmv);
       float castEdge = step(0.5, abs(d.g - d0.g));
@@ -1704,7 +1744,7 @@ void main(){
       // passage over a shaded facade full of balconies and signs, instead of dabs with paper between them)
       float inSh = step(0.5, mv(texture(tColor, q).a, d.g))*step(0.5, mv(texture(tColor, vUv).a, d0.g));
       float zTol = mix(0.15, 0.6, (1.0-same)*inSh*band);
-      okB *= d.a*max(same*step(0.80, dot(n, np))*(1.0-castEdge)*(1.0-smoothstep(0.35, 0.75, dmv)), (1.0-same)*band)*(1.0-step(zTol, abs(d.b*uDR-zp)));
+      okB *= d.a*max(same*step(0.80, dot(n, np))*(1.0-castEdge)*(1.0-smoothstep(0.35, 0.75, dmv)), (1.0-same)*band)*(1.0-step(zTol, abs(d.b*uDR-zp)))*rq;
       vec4 f = uFirst > 0.5 ? vec4(1.0) : texture(tF, q);
       float gk = exp(-float(k*k)/7.0);                 // (fading with distance: an equal-weight box, run across then down, left rectangles)
       sA += gk*okA*texture(tA, q); wA += gk*okA; fA += okA*f.r;
@@ -1898,7 +1938,7 @@ const aoMat = new THREE.ShaderMaterial({
 const aoScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), aoMat); q.frustumCulled=false; aoScene.add(q); }
 const wetMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
-  uniforms:{ tA:{value:null}, tB:{value:null}, tF:{value:null}, tColor:{value:null}, tData:{value:null}, tShape:{value:null}, uStep:{value:new THREE.Vector2()}, uDR:SHARED.uDepthRange, uFirst:{value:1} },
+  uniforms:{ tA:{value:null}, tB:{value:null}, tF:{value:null}, tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tThinC:{value:null}, tThinD:{value:null}, uStep:{value:new THREE.Vector2()}, uDR:SHARED.uDepthRange, uFirst:{value:1} },
   vertexShader:QUAD_VS, fragmentShader:WET_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending
 });
 const wetScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), wetMat); q.frustumCulled=false; wetScene.add(q); }
@@ -2344,10 +2384,10 @@ function fit(){
   aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.tShapeA.value = rtMain.texture[3]; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
   camera.aspect = W/H; camera.updateProjectionMatrix();
   const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtMain.texture[3]; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.tThinC.value=rtThin.texture[0]; P.tThinD.value=rtThin.texture[1]; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
-  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtMain.texture[3]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1];
+  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtMain.texture[3]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1];
   const Rz = resolveMat.uniforms; [0,1,2,3].forEach(i=>{ Rz['tG'+i].value = rtGlaze[i].texture; }); Rz.uResI.value.set(W,H); Rz.uKi.value = Math.min(W,H)/700;
   Rz.tShapeR.value = rtMain.texture[3]; Rz.tColorR.value = rtLit.texture; Rz.tDataR.value = rtMain.texture[1]; Rz.tW1.value = rtWet[1].texture[0]; Rz.tW2.value = rtWet[1].texture[1]; Rz.tWF.value = rtWet[1].texture[2];
-  wetMat.uniforms.tColor.value = rtLit.texture; wetMat.uniforms.tData.value = rtMain.texture[1]; wetMat.uniforms.tShape.value = rtMain.texture[3];
+  wetMat.uniforms.tColor.value = rtLit.texture; wetMat.uniforms.tData.value = rtMain.texture[1]; wetMat.uniforms.tShape.value = rtMain.texture[3]; wetMat.uniforms.tThinC.value = rtThin.texture[0]; wetMat.uniforms.tThinD.value = rtThin.texture[1];
   const F = finalMat.uniforms;
   F.tShapeF.value=rtMain.texture[3]; F.tLitF.value=rtLit.texture; F.tThinCF.value=rtThin.texture[0]; F.tThinDF.value=rtThin.texture[1]; F.tColor.value=rtMain.texture[0]; F.tData.value=rtMain.texture[1]; F.tLine.value=rtMain.texture[2];
   resetStrokes = true;
