@@ -5,6 +5,8 @@ A 3D model repainted live in watercolour, stroke by stroke, as you turn it. Open
 This repository holds only the published page (one self-contained `index.html`).
 
 ## Credits and licences
+- **Dutch windmill** by Holywood (https://sketchfab.com/3d-models/dutch-windmill-45c2c76d8fb94f1cbdda4329cd7aeabf),
+  licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Converted for this page, with grass added around it.
 - **Littlest Tokyo** by Glen Fox (https://artstation.com/artwork/1AGwX), licensed CC BY 4.0
   (https://creativecommons.org/licenses/by/4.0/). Converted for this page (outline shells and glass removed).
 - **Windmill (game ready)** by LamedeFeu (https://sketchfab.com/3d-models/windmill-game-ready-6a006afce57a447baa60c7a6791f0086),
