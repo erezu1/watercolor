@@ -491,6 +491,7 @@ function tagShapes(root){
     const ms = o.userData.role === 'grass' ? Infinity : 0.25*minSize;   // (grass is never a shape: it is painted as part of the ground)
     const big=new Map(); for(const [r,e] of ext){ const dx=e[3]-e[0], dy=e[4]-e[1], dz=e[5]-e[2]; const sz=[dx,dy,dz].sort((a,b)=>b-a);
       big.set(r, sz[0] > ms && sz[1] > 0.25*ms); }
+    let nBig = 0; for(const v of big.values()) if(v) nBig++; root.userData.nShapes = (root.userData.nShapes||0) + nBig;   // (how many separate parts: the model's level of detail)
     const sh=new Float32Array(nV*2);
     for(let i=0;i<nV;i++){ const r=find(i), key=meshNo*1000003+r; if(!big.get(r)) continue; sh[i*2]=0.5+0.5*hash(key,1); sh[i*2+1]=0.5+0.5*hash(key,2); }
     g.setAttribute('aShape', new THREE.BufferAttribute(sh,2));
@@ -794,9 +795,23 @@ function findThinThings(TA, TAR, nT){
     const r = Math.sqrt(Math.max(e/ne,0));
     if(r > maxR || L < 12*r) continue;
     for(const t of tris) isLine[t]=1;
-    chains.push({ knots, r: Math.max(r, 1e-4) });
+    chains.push({ knots, r: Math.max(r, 1e-4), tris, m, ax, t0, L });
   }
-  return { isLine, chains };
+  // BOARDS SIDE BY SIDE ARE A SURFACE (a slatted roof, a plank floor), not a lattice: a thin piece with a parallel
+  // neighbour closer than ~7 of its radii (touching boards are ~3.5 apart, lattice bars 10+) stays a surface — in the
+  // reference, painted by the surface strokes (taken out, the wall BEHIND the roof was painted through it)
+  const keep = chains.map(()=>true);
+  for(let i=0;i<chains.length;i++) for(let j=i+1;j<chains.length;j++){
+    const A = chains[i], B = chains[j];
+    const dp = Math.abs(A.ax[0]*B.ax[0] + A.ax[1]*B.ax[1] + A.ax[2]*B.ax[2]); if(dp < 0.94) continue;
+    const d = [0,1,2].map(c=>B.m[c]-A.m[c]); const al = d[0]*A.ax[0]+d[1]*A.ax[1]+d[2]*A.ax[2];
+    if(Math.abs(al) > 0.5*Math.max(A.L, B.L)) continue;          // (side by side, not end to end)
+    const perp = Math.sqrt(Math.max(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]-al*al, 0));
+    if(perp < 3.5*(A.r + B.r)){ keep[i] = false; keep[j] = false; }
+  }
+  const out = [];
+  chains.forEach((c,i)=>{ if(keep[i]) out.push({ knots:c.knots, r:c.r }); else for(const t of c.tris) isLine[t] = 0; });
+  return { isLine, chains: out };
 }
 // a brush mark is a strip along its (slightly curved) path: STRIP_N columns, two rows
 const STRIP_N = 4;
@@ -873,6 +888,13 @@ float lum3(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
 // is darker than the same material in the light by Llit/Lnow. The shadow glaze gives exactly that (as absorbance), so
 // shade on a white porch is a light grey and on dark wood a value step, as the model shows (it used to be one fixed,
 // strong, cool wash whatever the material: lavender dabs on white, black on dark wood). Halftones: glaze 1.
+// FORM MODELLING, relative to the object's OWN lit side (gSmax: the brightest light on the same shape within reach):
+// a faceted tower's turned faces are greyer than its sunny face; a uniformly lit white bar has nothing to be darker than
+float gSmax = 0.6;
+float shadeRel(float s, float fill){
+  float Lf = 0.08 + 0.40*fill, sR = clamp(gSmax, 0.25, 0.65);
+  return 0.6*max(log((Lf + 0.95*pow(sR, 1.3))/(Lf + 0.95*pow(max(s, 0.0), 1.3))) - 0.08, 0.0);   // (a painter compresses the half tones: lights stay luminous)
+}
 float shadeA(float s, float cst, float fill, float face){
   float Lf = 0.08 + 0.40*fill, sLit = cst > 0.5 ? max(face*2.0 - 1.0, 0.3) : 0.45;   // (form shade against a moderately lit face: with a raking sun the lit side gets no more)
   float Llit = Lf + 0.95*pow(sLit, 1.3), Lnow = Lf + 0.95*pow(max(s, 0.0), 1.3);
@@ -1050,13 +1072,13 @@ void main(){
     bool onscreen = abs(ndc.x) < 1.15 && abs(ndc.y) < 1.15 && vClip.w > 0.0;
     float z0 = texture2D(tData, uv).b*uDepthRange;
     gZS = clamp(z0/13.0, 0.7, 3.0);
-    vis = (1.0-smoothstep(0.08*gZS,0.60*gZS, vz-z0)) * smoothstep(-0.05,0.40, ndv);
+    vis = (1.0-smoothstep(0.08*gZS,0.60*gZS, vz-z0)) * smoothstep(-0.05,0.40, abs(ndv));   // (either side: a flag, a sign, a sail is seen from behind too; a solid's back faces are hidden by the depth test)
     // hidden only by slivers just in front (grass behind grass): still visible as far as the painting goes, so a tiny
     // turn that swaps which blade is in front does not swap the strokes
     if(hasShape(texture2D(tShape, uv)) < 0.5 && texture2D(tData, uv).a > 0.5 && vz - z0 < 0.5*gZS) vis = max(vis, smoothstep(-0.05,0.40, abs(ndv)));
     if(!onscreen) vis = 0.0;
 
-    float distS = pow(uRefDist/uCamDist, 0.85);
+    float distS = pow(uRefDist/uCamDist, 0.45);   // (zooming in shows a FINER brush: strokes grow less than the model)
     float base = layer<0.5 ? 50.0 : layer<1.5 ? 19.0 : layer<2.5 ? 30.0 : layer<3.5 ? 9.0 : 7.0;
     float isMid = step(0.5,layer)*step(layer,2.5);
     float sz = base*uK*uSizeK*distS*vInfo.z*(0.6+0.9*rr.x)*(0.8+0.5*uLoose);
@@ -1109,7 +1131,7 @@ void main(){
     float mode = layer<0.5 ? -1.0 : (layer>1.5 && layer<2.5) ? ((castHere || !bigShape) ? 1.0 : 2.0) : (layer>2.5 && layer<3.5) ? 0.5 : 0.0;
     float reach = layer>2.5 ? max(sz*0.6, 4.5*uK) : sz*0.9;
     float h = reach/2.0;
-    float W = 0.0; vec2 Wp = vec2(0.0); vec3 Wpp = vec3(0.0); vec3 Wc = vec3(0.0); float Ws = 0.0; float Wn = 0.0; vec2 Wno = vec2(0.0); float Bz = 0.0, Bw = 0.0, Ul = 0.0, Uw = 0.0, Nl = 0.0; vec2 Gl = vec2(0.0); float Gw = 0.0, Ps = 0.0, Pw = 0.0, Tz = 0.0, Tw = 0.0;
+    float W = 0.0; vec2 Wp = vec2(0.0); vec3 Wpp = vec3(0.0); vec3 Wc = vec3(0.0); float Ws = 0.0; float Wn = 0.0; vec2 Wno = vec2(0.0); float Bz = 0.0, Bw = 0.0, Ul = 0.0, Uw = 0.0, Nl = 0.0; vec2 Gl = vec2(0.0); float Gw = 0.0, Ps = 0.0, Pw = 0.0, Tz = 0.0, Tw = 0.0, Smx = -1.0;
     if(vis > 0.02){                                    // a coarse look around: the shape's colour, light and main axis
       for(int j=-2;j<=2;j++){
         float prevS = -1.0, prevR = 0.0;
@@ -1119,7 +1141,7 @@ void main(){
           vec4 c = texture2D(tColor,q); vec4 d = texture2D(tData,q); vec4 e = texture2D(tShape,q);
           float w = simAt(c, d, e, g0, s0, z0, e0, tol, mode);
           float wc = d.a*sameShape(e, e0)*step(0.8, dot(octDec(e.xy), octDec(e0.xy)));   // same shape and plane: how the light turns across it
-          Gl += wc*o*(c.a-s0); Gw += wc*dot(o,o); Ps += wc*c.a; Pw += wc;
+          Gl += wc*o*(c.a-s0); Gw += wc*dot(o,o); Ps += wc*c.a; Pw += wc; if(d.a*sameShape(e, e0) > 0.5) Smx = max(Smx, c.a);
           W += w; Wp += w*o; Wpp += w*vec3(o.x*o.x, o.x*o.y, o.y*o.y); Wc += c.rgb*w; Ws += c.a*w;
           if(prevS >= 0.0){ Bz += d.a*abs(c.a-prevS); Bw += d.a; }   // light flickering from sample to sample: blades, leaves
           float lr = dot(texture2D(tRaw, q).rgb, vec3(0.2126,0.7152,0.0722));
@@ -1131,6 +1153,9 @@ void main(){
         }
       }
     }
+    for(int i=0;i<8;i++){ vec2 q = uv + vec2(cos(float(i)*0.785), sin(float(i)*0.785))*3.2*h/uRes;   // (a wider look for the lit side)
+      vec4 eq = texture2D(tShape,q); if(texture2D(tData,q).a*sameShape(eq, e0) > 0.5) Smx = max(Smx, texture2D(tColor,q).a); }
+    gSmax = Smx >= 0.0 ? Smx : s0;
     float inv = 1.0/max(W,1e-3);
     vec2 cen = Wp*inv;
     float sxx = Wpp.x*inv - cen.x*cen.x, sxy = Wpp.y*inv - cen.x*cen.y, syy = Wpp.z*inv - cen.y*cen.y;
@@ -1202,7 +1227,7 @@ void main(){
         float t = float(i-2)*0.5; vec2 q = cq + nT*(t*hw)/uRes;
         vec4 eq = texture2D(tShape,q);
         ww[i] = texture2D(tData,q).a*max(sameShape(eq, e0)*step(0.8, dot(octDec(eq.xy), octDec(e0.xy))), 1.0-hasShape(e0));   // (its own PLANE: on a faceted tower the next face's shade must not ramp across a lit face)
-        vec4 dq = texture2D(tData,q); vv[i] = shadeA(texture2D(tColor,q).a, dq.g, texture2D(tLine,q).b, dq.r);   // (absorbance the model's shade asks for)
+        vec4 dq = texture2D(tData,q); vv[i] = max(shadeA(texture2D(tColor,q).a, dq.g, texture2D(tLine,q).b, dq.r), dq.g > 0.5 ? 0.0 : shadeRel(texture2D(tColor,q).a, texture2D(tLine,q).b));   // (the model's shade, and the form's turn away from its own lit side)
       }
       float vC = vv[2];
       float vL = ww[0] > 0.5 ? vv[0] : ww[1] > 0.5 ? vv[1] : vC;
@@ -1253,7 +1278,7 @@ void main(){
       }
       // colour: a cool grey carrying some of the material's own colour; its mean absorbance is 1 (amount says how much)
       float mS = dot(uShadow, vec3(0.3333)), mA = dot(Ab, vec3(0.3333));
-      vec3 coolN = mix(uShadow/max(mS, 1e-3), vec3(1.0), 0.45), ownN = Ab/max(mA, 1e-3);
+      vec3 coolN = mix(uShadow/max(mS, 1e-3), vec3(1.0), 0.45 + 0.30*paleK), ownN = Ab/max(mA, 1e-3);   // (shade on white: a neutral, slightly cool grey)
       col = mix(coolN, ownN, 0.45*smoothstep(0.05, 0.40, mA));
     } else if(layer<3.5){                                 // cream / butter: small strong darks where the eye needs them
       float D = pocket ? smoothstep(0.15, 0.4, crev)*1.3*aniso : 0.0;   // a recess long enough to read as one (no spots)                            // (no thin lines in the light: they read as pencil; shape borders do that job)
@@ -1279,7 +1304,8 @@ void main(){
       float flat_ = smoothstep(0.6, 0.85, vNor.y), low = step(vPos.y, uFadeY);
       amount *= 1.0 - low*(flat_*smoothstep(0.70, 1.0, r) + (1.0-flat_)*smoothstep(0.88, 0.97, r));
     }
-    if(layer < 2.5 && uDbgP < 0.5) amount *= roomy;
+    float distinct = layer > 0.5 && layer < 1.5 ? hasShape(e0)*max(smoothstep(0.30, 0.55, sat), smoothstep(0.15, 0.30, abs(lumA - Ul/max(Uw,1.0)))) : 0.0;
+    if(layer < 2.5 && uDbgP < 0.5) amount *= max(roomy, distinct);   // (too small for the brush is left out — unless it stands out: a flag, a lifebuoy; cut-in keeps it inside)
     if(uDbgP > 1.5 && layer > 1.5 && layer < 2.5){ col = mode > 1.5 ? vec3(2.5,0.1,2.5) : vec3(0.1,2.5,2.5); amount = max(amount, 0.0); }   // debug: graded (green) vs passage (red)
     if(fine) amount *= smoothstep(0.15, 0.75, nearEdge);
     amount *= vis;
@@ -2054,6 +2080,13 @@ function declutter(geo, frac){
 function addModel(name, root, geo, mat, countScale){
   const m=new THREE.Mesh(geo, mat); m.userData.role='model'; m.frustumCulled=false; root.add(m);
   tagShapes(root);
+  // THE BRUSH FITS THE MODEL'S DETAIL (user: "the strokes need to be smaller — I don't understand what you tried to
+  // draw"): a model of many separate parts (Moomin House, Japanese Bridge: ~900; pavilion ~50) gets a finer brush and
+  // more strokes, so its windows, posts and boards are painted rather than swallowed by big marks
+  const dP = Math.min(1, Math.max(0, (Math.log((root.userData.nShapes||50)/80))/Math.log(700/80)));
+  root.userData.brushK = 1 - 0.38*dP;
+  const LN = LAYERS.reduce((a,l)=>a+l.n, 0);
+  countScale = Math.min((countScale||1)*(1 + 1.4*dP), 86000/LN);   // (the stroke memory holds ~100k)
   strokeMeshes[name] = makeStrokeMesh(root, countScale);
   loaded[name] = true;
 }
@@ -2176,7 +2209,7 @@ const MODELS = {
   mill3:   { root:()=>mill3Group, yaw:0.70, pitch:0.38, fit:0.95, shadeK:1.8, load:()=>loadPack('mill3', 'dutch_windmill_2', mill3Group, { ground:true, lift:2.4 }) },
   mill2:   { root:()=>mill2Group, yaw:0.60, pitch:0.35, fit:0.85, load:()=>loadPack('mill2', 'windmill_game_ready', mill2Group, { ground:true }) },
   lighthouse:{ root:()=>lightGroup, yaw:0.70, pitch:0.38, fit:1.05, shadeK:2.0, load:()=>loadPack('lighthouse', 'lighthouse', lightGroup, { lift:2.0 }),
-               fade:{ c:new THREE.Vector2(0.45,-0.1), r:3.2, y:-2.84 } },   // (its own sea: faded in a ring round the island, not at the sea's far edges)
+               fade:{ c:new THREE.Vector2(0.45,-0.1), r:3.2, y:-2.84 }, fadeK:1.35 },   // (more of its sea)   // (its own sea: faded in a ring round the island, not at the sea's far edges)
   moomin:  { root:()=>moominGroup, yaw:0.70, pitch:0.38, fit:0.88, shadeK:1.3, load:()=>loadPack('moomin', 'moomin_house', moominGroup, { ground:true, lift:1.4 }) },
   bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup),
              fade:null }
@@ -2199,7 +2232,7 @@ async function setScene(name){
   Object.keys(MODELS).forEach(k=>{ MODELS[k].root().visible = k===name; });
   Object.keys(strokeMeshes).forEach(k=>{ strokeMeshes[k].meshes.forEach(x=>{ x.visible = (k===name); }); strokeMeshes[k].points.visible = (k===name); });
   const P = planMat.uniforms;
-  P.uSizeK.value = c.strokeK; P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1;
+  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1;
   P.uFadeR.value = c.fade ? c.fade.r*(c.fadeK || 1) : 0; if(c.fade){ P.uFadeC.value.copy(c.fade.c); P.uFadeY.value = c.fade.y; }
   setupShadow(c);
   view.yaw=c.yaw; view.pitch=c.pitch; view.zoom=1; view.vyaw=0; view.vpitch=0;
@@ -2522,7 +2555,7 @@ fit(); setMood(0,false);
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>canvas.classList.remove('faded'), 80); }
-window.__pavilion = { camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+window.__pavilion = { nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
   passes:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4), acc={}; let t=0;
