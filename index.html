@@ -631,6 +631,12 @@ function buildStrokes(root, countScale, skyN){
   });
   const nT = TAR.length;
   const thin = findThinThings(TA, TAR, nT);
+  thin.boardGroups.forEach((tris, gi)=>{                  // (boards side by side: one shape id for the whole group)
+    const sx = 0.5 + 0.5*((Math.sin((gi+1)*91.7)*43758.5453)%1+1)%1, sy = 0.5 + 0.5*((Math.sin((gi+1)*17.3)*24634.6345)%1+1)%1;
+    for(const t of tris){ const o = TM[t], g = o.geometry, idx = g.index, sh = g.attributes.aShape; if(!sh) continue;
+      for(let v=0; v<3; v++){ const i = idx ? idx.getX(TT[t]*3+v) : TT[t]*3+v; sh.setXY(i, sx, sy); }
+      sh.needsUpdate = true; TSH[t] = sx*1000 + sy; }
+  });
   const planeAxis = planeAxes(TA, TN, TAR, TSH, nT);
   for(let i=0;i<nT;i++) if(thin.isLine[i] === 1) TRO[i] = 'line';      // (not sown with surface strokes; boards (2) are)
   { const per = new Map(); for(let i=0;i<nT;i++) if(thin.isLine[i]){ if(!per.has(TM[i])) per.set(TM[i], new Map()); per.get(TM[i]).set(TT[i], thin.isLine[i]); }
@@ -808,7 +814,8 @@ function findThinThings(TA, TAR, nT){
   // neighbour closer than ~7 of its radii (touching boards are ~3.5 apart, lattice bars 10+) stays a surface — in the
   // reference, painted by the surface strokes (taken out, the wall BEHIND the roof was painted through it) — and still
   // gets its lines (isLine 2), drawn only where a board stands out from what is beside it (an edge-on sail against the sky)
-  const keep = chains.map(()=>true);
+  const keep = chains.map(()=>true), gp = chains.map((_,i)=>i);
+  const gf = a=>{ while(gp[a]!==a){ gp[a]=gp[gp[a]]; a=gp[a]; } return a; };
   for(let i=0;i<chains.length;i++) for(let j=i+1;j<chains.length;j++){
     const A = chains[i], B = chains[j];
     if(A.flat < 6 || B.flat < 6) continue;                     // (only PLANKS make a surface; lattice bars stay lines)
@@ -816,11 +823,13 @@ function findThinThings(TA, TAR, nT){
     const d = [0,1,2].map(c=>B.m[c]-A.m[c]); const al = d[0]*A.ax[0]+d[1]*A.ax[1]+d[2]*A.ax[2];
     if(Math.abs(al) > 0.5*Math.max(A.L, B.L)) continue;          // (side by side, not end to end)
     const perp = Math.sqrt(Math.max(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]-al*al, 0));
-    if(perp < 3.5*(A.r + B.r)){ keep[i] = false; keep[j] = false; }
+    if(perp < 3.5*(A.r + B.r)){ keep[i] = false; keep[j] = false; gp[gf(i)] = gf(j); }
   }
   const out = [];
   chains.forEach((c,i)=>{ out.push({ knots:c.knots, r:c.r }); if(!keep[i]) for(const t of c.tris) isLine[t] = 2; });
-  return { isLine, chains: out };
+  // ... and its boards are ONE shape (one sail, one roof): strokes run along the whole of it instead of a dab per board
+  const groups = new Map(); chains.forEach((c,i)=>{ if(keep[i]) return; const g = gf(i); if(!groups.has(g)) groups.set(g, []); groups.get(g).push(...c.tris); });
+  return { isLine, chains: out, boardGroups: [...groups.values()] };
 }
 // a brush mark is a strip along its (slightly curved) path: STRIP_N columns, two rows
 const STRIP_N = 4;
@@ -1330,7 +1339,7 @@ void main(){
     // an even covering of the picture: switch on only as many strokes as are needed to cover their part of it
     if(vDen > 0.0){
       float pxPerUnit = uFocal/max(vz,0.1);
-      float have = vDen/(max(ndv,0.12)*pxPerUnit*pxPerUnit);            // strokes of this kind per pixel, here
+      float have = vDen/(max(abs(ndv),0.12)*pxPerUnit*pxPerUnit);       // strokes of this kind per pixel, here (a sheet seen from behind counts too: it was thinned out to dabs)
       float cover = layer<0.5 ? 7.0 : layer<1.5 ? 9.0 : layer<2.5 ? 5.0 : 2.5;     // random placement: ~e^-cover of a wash is missed
       float need = cover/(3.14159*hl*hw);                                // strokes per pixel for this many layers of paint
       thinK = (need/max(have,1e-9))/max(rnd2, 1e-4);       // > 1: switched on; a little below: only just off
