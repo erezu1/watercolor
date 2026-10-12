@@ -960,6 +960,7 @@ void main(){
       hl = 0.5*len + hw;
       tc = ((pa+pb)*0.5/uRes)*2.0-1.0;
       amount = 0.9*uCables; vis = 1.0;
+      if(uFadeR > 0.0 && vPos.y <= uFadeY) amount *= 1.0 - smoothstep(0.70, 1.0, length(vPos.xz - uFadeC)/uFadeR);   // (lines on the ground fade with it: no lone dashes)
       vec3 own = lw > 0.5 ? lc/lw : vec3(0.08);           // (too thin to show in the reference: a dark line, like a cable against the sky)
       bool formed = pn > 0.5 && hw > 2.2*uK;
       if(formed){                                          // wide enough to show its form: graded across (a cable stays one line)
@@ -2004,7 +2005,7 @@ const MODELS = {
   pavilion:{ root:()=>group, target:new THREE.Vector3(0,1.15,0), halfW:2.7, halfH:3.5, light:new THREE.Vector3(-0.62,0.80,0.30).normalize(),
              shadowHalf:5.6, shadowCenter:new THREE.Vector3(0,1.6,0), yaw:0.30, pitch:0.36 },
   tokyo:   { root:()=>modelGroup, target:new THREE.Vector3(0,-1.1,0), halfW:3.8, halfH:4.3, light:new THREE.Vector3(-0.50,0.80,0.40).normalize(),
-             shadowHalf:6.4, shadowCenter:new THREE.Vector3(0,0,0), yaw:0.55, pitch:0.50, strokeK:0.90, load:loadTokyo },
+             shadowHalf:6.4, shadowCenter:new THREE.Vector3(0,0,0), yaw:0.55, pitch:0.50, strokeK:0.90, load:loadTokyo, fadeK:1.45 },   // (its street is part of the picture: fade only the base's far corners)
   rods:    { root:()=>rodsGroup, yaw:0.35, pitch:0.30, load:async ()=>buildRods() },
   mill:    { root:()=>millGroup, yaw:0.70, pitch:0.40, fit:1.15, shadeK:1.7, load:()=>loadPack('mill', 'dutch_windmill', millGroup) },   // (framing from its bounds)
   mill3:   { root:()=>mill3Group, yaw:0.70, pitch:0.38, fit:0.95, shadeK:1.8, load:()=>loadPack('mill3', 'dutch_windmill_2', mill3Group, { ground:true, lift:2.4 }) },
@@ -2032,7 +2033,7 @@ async function setScene(name){
   Object.keys(strokeMeshes).forEach(k=>{ strokeMeshes[k].meshes.forEach(x=>{ x.visible = (k===name); }); strokeMeshes[k].points.visible = (k===name); });
   const P = planMat.uniforms;
   P.uSizeK.value = c.strokeK; P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1;
-  P.uFadeR.value = c.fade ? c.fade.r : 0; if(c.fade){ P.uFadeC.value.copy(c.fade.c); P.uFadeY.value = c.fade.y; }
+  P.uFadeR.value = c.fade ? c.fade.r*(c.fadeK || 1) : 0; if(c.fade){ P.uFadeC.value.copy(c.fade.c); P.uFadeY.value = c.fade.y; }
   setupShadow(c);
   view.yaw=c.yaw; view.pitch=c.pitch; view.zoom=1; view.vyaw=0; view.vpitch=0;
   showPainting(name);
