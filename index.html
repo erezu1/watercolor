@@ -96,17 +96,17 @@ body.menu-open .toast{opacity:0}
 
 
 /* ---- the two buttons: painting (bottom left), settings (bottom right) ---- */
-.pick-btn{
+.pick-btn{                                             /* a framed painting: opens the chooser */
   position:fixed;left:calc(24px + env(safe-area-inset-left,0px));bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:3;
-  appearance:none;cursor:pointer;display:flex;align-items:center;gap:10px;height:48px;padding:0 14px 0 6px;border-radius:999px;
-  border:1px solid var(--dock-edge);background:var(--dock);color:var(--ink);font-family:var(--serif);font-size:16px;font-style:italic;font-weight:500;
+  appearance:none;cursor:pointer;width:48px;height:48px;border-radius:50%;padding:0;display:grid;place-items:center;
+  border:1px solid var(--dock-edge);background:var(--dock);color:var(--ink);
   -webkit-backdrop-filter:blur(16px) saturate(1.25);backdrop-filter:blur(16px) saturate(1.25);box-shadow:0 8px 22px -10px var(--shadow);
-  max-width:calc(100% - 120px);
 }
-.pick-btn img{width:36px;height:36px;border-radius:50%;object-fit:cover;box-shadow:inset 0 0 0 1px rgba(40,30,15,.2);flex:0 0 auto}
-.pick-btn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pick-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto;opacity:.7;transition:transform .2s ease}
-.pick-btn[aria-expanded="true"] svg{transform:rotate(180deg)}
+.pick-btn svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.pick-btn .dot{fill:currentColor;stroke:none}
+.pick-btn .i-close{display:none}
+.pick-btn[aria-expanded="true"] .i-open{display:none}
+.pick-btn[aria-expanded="true"] .i-close{display:inline}
 
 /* ---- panels ---- */
 .panel{
@@ -156,7 +156,7 @@ body.menu-open .toast{opacity:0}
 .peek:active,.peek.on{background:var(--chip-on);color:var(--chip-on-ink)}
 .about{margin:0;font-size:14px;font-style:italic;line-height:1.4;color:var(--ink-soft);text-align:center}
 .pick-btn:focus-visible,.choices button:focus-visible,.mood:focus-visible,.peek:focus-visible,canvas:focus-visible{outline:2px solid #4a5da8;outline-offset:2px}
-@media (prefers-reduced-motion:reduce){.hint .hint-hand{animation:none}.hint,.toast{transition:none}.panel{animation:none}.pick-btn svg{transition:none}}
+@media (prefers-reduced-motion:reduce){.hint .hint-hand{animation:none}.hint,.toast{transition:none}.panel{animation:none}}
 </style>
 
 </head>
@@ -172,8 +172,7 @@ body.menu-open .toast{opacity:0}
 </div>
 <div class="toast" id="toast"></div>
 <button class="pick-btn" id="pickBtn" aria-expanded="false" aria-controls="picker" aria-label="Choose a painting">
-  <img id="pickImg" alt="" width="36" height="36"><span id="pickName">The Pavilion</span>
-  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14.5l5-5 5 5"/></svg>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><g class="i-open"><rect x="3" y="4" width="18" height="16" rx="1.2"/><rect x="6" y="7" width="12" height="10" rx=".4"/><path d="M6.6 16.4l3.6-4.1 2.6 2.8 1.7-1.8 2.9 3.1"/><circle class="dot" cx="14.6" cy="9.9" r="1.15"/></g><path class="i-close" d="M7 7l10 10M17 7L7 17"/></svg>
 </button>
 <div class="panel picker" id="picker" role="dialog" aria-label="Choose a painting" hidden>
   <h2>Paintings</h2>
@@ -1477,9 +1476,9 @@ void stateMain(){
   bool on = present && p4.w > 0.999;                      // ... and wants it painted (not thinned out)
   if(uReset > 0.5){ if(on){ o0 = p0; o1 = vec4(0.0, p1.yzw); o2 = p2; o3 = p3; o4 = vec4(0.0, p4.xy, 1.0); } else clearOut(); return; }
   float h = hash(vec2(tx));
-  bool moving = uRestT < 0.25 + 0.8*h;                   // (each stroke notices the hand has stopped at its own moment)
+  bool moving = uRestT < 0.08 + 0.25*h;                  // (user: after the movement stops, everything is done within ~1 s)                   // (each stroke notices the hand has stopped at its own moment)
   float sizeG = p1.y + 2.0*p1.z;
-  float kC = 1.0 - exp(-uDt/0.30);
+  float kC = 1.0 - exp(-uDt/0.10);
   bool alive = q1.w > 0.5 && q2.w > 0.002;
   if(!alive){
     if(!on){ clearOut(); return; }
@@ -1493,7 +1492,7 @@ void stateMain(){
     float have = g < 0.5 || g > 5.5 ? texture(tW0, uvG).a : g < 1.5 ? texture(tW1, uvG).a : g < 2.5 ? texture(tW2, uvG).a : texture(tW3, uvG).a;
     bool hole = have < 0.12 && g < 2.5 && sizeG > 14.0*uK;   // (only where a SHAPE would have a hole: washes, colour, shadow;
                                                           // never darks, flecks or tiny dabs, which are sparse by nature)
-    bool may = bigG || hole || (!moving && uRestT > 0.25 + 1.0*h);
+    bool may = bigG || hole || (!moving && uRestT > 0.08 + 0.30*h);
     if(!may){ clearOut(); return; }
     status = 1.0;
     o0 = p0; o1 = vec4(0.0, 0.0, p1.z*0.7, p1.w); o2 = p2; o3 = p3; o4 = vec4(1.0 + 8.0, p4.xy, 1.0);   // (still growing)
@@ -1518,7 +1517,7 @@ void stateMain(){
   // for about its own size (q1.x < 0 counts the distance, in px) — a nudge changes nothing, a real drag lets it go at once
   float carried = -min(s0, 0.0);
   vec2 dA2 = q4.w > 0.5 ? p4.xy - q4.yz : vec2(0.0); if(length(dA2) > 3.0*size + 60.0*uK) dA2 = vec2(0.0);
-  if(!follow && !letGo && !big && carried + length(dA2) < 0.8*size + 3.0*uK && (moving || uRestT < 0.25 + 1.0*h)){
+  if(!follow && !letGo && !big && carried + length(dA2) < 0.8*size + 3.0*uK && (moving || uRestT < 0.08 + 0.30*h)){
     status = 3.0; o0 = vec4(q0.xy + dA2, q0.zw); o1 = vec4(-(carried + length(dA2)) - 1e-3, s1, hw, q1.w); o2 = q2; o3 = q3;
     o4 = vec4(q4.x, p4.xy, 1.0); o5 = vec4(trail*exp(-uDt/0.06), 0.0, 0.0); return;
   }
@@ -1539,7 +1538,7 @@ void stateMain(){
     if(growing){                                          // a newborn stroke is pulled out along its path, from its start
       vec2 sA = A + dAnc, sB = B + dAnc; float dL = length(GB - sB);
       nA = sA + (GA - sA)*(1.0 - exp(-uDt/0.05));
-      nB = sB + (dL > 1e-4 ? (GB - sB)/dL : vec2(0.0))*max(dL*(1.0 - exp(-uDt/0.10)), min(dL, 30.0*uK*uDt));
+      nB = sB + (dL > 1e-4 ? (GB - sB)/dL : vec2(0.0))*max(dL*(1.0 - exp(-uDt/0.06)), min(dL, 80.0*uK*uDt));
       kk = mix(q0.w, gk, kC);
       if(dL < tolP + 0.5*uK) growing = false;
     } else if(!still){
@@ -1567,7 +1566,7 @@ void stateMain(){
     float fW = flag(q4.x, 1.0) > 0.5 ? step(0.03, dW) : (moving ? step(0.40, dW) : step(0.01, dW));
     float fA = flag(q4.x, 2.0) > 0.5 ? step(0.03, dAm) : (moving ? step(0.30, dAm) : step(0.01, dAm));
     float fC = flag(q4.x, 4.0) > 0.5 ? step(0.03, dC) : (moving ? step(0.30, dC) : step(0.01, dC));
-    float kA = 1.0 - exp(-uDt/0.12);
+    float kA = 1.0 - exp(-uDt/0.08);
     status = still ? 3.0 : 2.0;
     o0 = vec4(nA, th, kk); o1 = vec4(0.0, Ln, mix(hw, p1.z, fW*kC), mix(q1.w, p1.w, fC*kC));
     o2 = vec4(mix(q2.rgb, p2.rgb, fC*kC), mix(q2.w, p2.w, fA*kA)); o3 = mix(q3, p3, fC*kC); o4 = vec4(fW + 2.0*fA + 4.0*fC + (growing ? 8.0 : 0.0), p4.xy, 1.0);
@@ -1798,7 +1797,7 @@ void main(){
   // the blend follows the paint at once (a stored blend would stay behind on the screen while the paint moves, and show
   // as streaks); only paint that has clearly just been laid down — where there was little or none — shows as painted
   // first and blends over ~0.35 s ('fresh' fades)
-  float fresh = uResetR > 0.5 ? 0.0 : max(Ep.a*exp(-uDtR/0.35), smoothstep(0.06, 0.16, rawNow - rawPrev)*(1.0 - smoothstep(0.05, 0.20, rawPrev)));
+  float fresh = uResetR > 0.5 ? 0.0 : max(Ep.a*exp(-uDtR/0.18), smoothstep(0.06, 0.16, rawNow - rawPrev)*(1.0 - smoothstep(0.05, 0.20, rawPrev)));
   vec3 E = ((A1w + A2w) - (A1d + A2d))*(1.0 - fresh);
   oE = vec4(E, fresh);
   vec3 A1 = A1d + E, A2 = A2d;
@@ -2206,7 +2205,7 @@ PAINTINGS.forEach(p=>{
 });
 function showPainting(name){
   const p = PAINTINGS.find(q=>q.id===name) || { id:name, title:'Test', desc:'', aria:'A test scene', credit:'A test scene for the painter.' };
-  $('pickName').textContent = p.title; $('pickImg').src = thumb(p.id);
+  $('pickBtn').setAttribute('aria-label', 'Choose a painting (now: '+p.title+')');
   pickBtn.setAttribute('aria-label', 'Choose a painting (now: '+p.title+')');
   [...paintingsEl.querySelectorAll('button')].forEach(b=>b.setAttribute('aria-current', b.dataset.id===name ? 'true' : 'false'));
   canvas.setAttribute('aria-label', p.aria+'. Drag to turn it, pinch to zoom.');
@@ -2443,7 +2442,7 @@ function frame(now){
     }
   }
   if(showRaw!==showRawTarget){ showRaw += (showRawTarget-showRaw)*0.3; if(Math.abs(showRawTarget-showRaw)<0.003) showRaw=showRawTarget; dirty = true; }
-  if(dirty) animUntil = now + 2200;                     // the strokes need a moment to finish growing / drying
+  if(dirty) animUntil = now + 1300;                     // the strokes need a moment to finish growing / drying
   if(now > animUntil) return;                            // nothing changing: the painting stays as it is
   dirty=false;
   render(dt);
