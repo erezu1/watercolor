@@ -1661,7 +1661,7 @@ precision highp float;
 varying vec2 vUv;
 uniform sampler2D tG0; uniform sampler2D tG1; uniform sampler2D tG2; uniform sampler2D tG3;
 uniform sampler2D tW1; uniform sampler2D tW2; uniform sampler2D tWF; uniform sampler2D tShapeR; uniform sampler2D tDataR; uniform sampler2D tColorR;
-uniform vec2 uResI; uniform float uKi, uSolo, uWetOn, uDR, uDtR, uResetR; uniform vec3 uShadowR; uniform sampler2D tEprev; uniform sampler2D tAprev;
+uniform vec2 uResI; uniform float uKi, uSolo, uWetOn, uDR, uDtR, uResetR, uGranK, uNzK; uniform vec3 uShadowR; uniform sampler2D tEprev; uniform sampler2D tAprev;
 layout(location=0) out highp vec4 oAbs;   // the painting (absorbance)
 layout(location=1) out highp vec4 oE;     // how far the blending has got (kept from frame to frame)
 ${FS_COMMON}
@@ -1699,8 +1699,8 @@ void main(){
   // (on ROTATED grids: value noise on the pixel grid shows square cells, which read as pixelation in dark washes)
   vec2 pr1 = mat2(0.80, -0.60, 0.60, 0.80)*pp, pr2 = mat2(0.28, 0.96, -0.96, 0.28)*pp;
   float paperH = 0.60*vn(pr1*0.16) + 0.40*vn(pr2*0.33+3.0);
-  float nz = (vn(pp*0.14)-0.5)*0.07 + (vn(pp*0.035)-0.5)*0.12;            // the paper's tooth and the hand make the borders ragged
-  float gran = smoothstep(0.25, 0.75, paperH);                          // pigment settling into the hollows of the paper
+  float nz = ((vn(pp*0.14)-0.5)*0.07 + (vn(pp*0.035)-0.5)*0.12)*uNzK;            // the paper's tooth and the hand make the borders ragged
+  float gran = mix(0.5, smoothstep(0.25, 0.75, paperH), uGranK);                          // pigment settling into the hollows of the paper
   vec3 A0 = wash(tG0, 0.04, 0.40, nz, 0.25, 5.0)*(0.95+0.10*gran);
   vec4 wf = texture2D(tWF, vUv);
   // every shape is its own wash: where it meets another shape its pigment collects along the border, and the one
@@ -1763,7 +1763,7 @@ const FINAL_FS = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D tAbs; uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tLine; uniform sampler2D tShapeF; uniform sampler2D tLitF;
-uniform vec2 uRes; uniform vec2 uResI; uniform vec2 uSlip;
+uniform vec2 uRes; uniform vec2 uResI; uniform vec2 uSlip; uniform float uPaperK;
 uniform float uKf, uKi, uPencil, uShowRaw, uDbg;
 uniform vec3 uPaper;
 ${FS_COMMON}
@@ -1786,7 +1786,7 @@ void main(){
   vec2 pxA = 1.0/uResI;
   vec3 A = 0.25*(texture2D(tAbs, uv + vec2( 0.38, 0.13)*pxA).rgb + texture2D(tAbs, uv + vec2(-0.38,-0.13)*pxA).rgb
                + texture2D(tAbs, uv + vec2(-0.13, 0.38)*pxA).rgb + texture2D(tAbs, uv + vec2( 0.13,-0.38)*pxA).rgb);
-  float pShade = 0.962 + 0.07*paperH;
+  float pShade = 1.0 + (0.07*paperH - 0.038)*uPaperK;
   float vig = 1.0;                                       // (no darkened edges: the paper is the whole page)
   vec3 col = uPaper*pShade*vig*exp(-A);
 
@@ -1843,14 +1843,14 @@ const wetMat = new THREE.ShaderMaterial({
 const wetScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), wetMat); q.frustumCulled=false; wetScene.add(q); }
 const resolveMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
-  uniforms:{ tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1} },
+  uniforms:{ tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
   vertexShader:QUAD_VS, fragmentShader:RESOLVE_FS, depthTest:false, depthWrite:false
 });
 const finalMat = new THREE.ShaderMaterial({
   uniforms:{
     tAbs:{value:null}, tShapeF:{value:null}, tLitF:{value:null}, tColor:{value:null}, tData:{value:null}, tLine:{value:null},
     uRes:{value:new THREE.Vector2(1,1)}, uResI:{value:new THREE.Vector2(1,1)}, uSlip:{value:new THREE.Vector2()},
-    uKf:{value:1}, uKi:{value:1}, uPencil:{value:0}, uShowRaw:{value:0}, uDbg:{value:0}, uPaper:{value:new THREE.Vector3()}
+    uKf:{value:1}, uKi:{value:1}, uPaperK:{value:0.5}, uPencil:{value:0}, uShowRaw:{value:0}, uDbg:{value:0}, uPaper:{value:new THREE.Vector3()}
   },
   vertexShader:QUAD_VS, fragmentShader:FINAL_FS, depthTest:false, depthWrite:false
 });
@@ -2394,7 +2394,7 @@ fit(); setMood(0,false);
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>canvas.classList.remove('faded'), 80); }
-window.__pavilion = { cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+window.__pavilion = { grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
   passes:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4), acc={}; let t=0;
