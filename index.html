@@ -2059,8 +2059,22 @@ function showPainting(name){
   $('credit').innerHTML = '<p>'+p.credit+'</p>';
 }
 let switching = null;
+// every painting has its own address: …/#lighthouse, …/#dutch-mill (from its title; its id works too; ?scene=<id> too)
+const slugOf = p => p.title.toLowerCase().replace(/^the /,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+function fromAddress(){
+  const h = decodeURIComponent(location.hash.slice(1)).toLowerCase(), q = new URLSearchParams(location.search).get('scene');
+  const p = h && PAINTINGS.find(p=>p.id===h || slugOf(p)===h);
+  return p ? p.id : (q && MODELS[q]) ? q : null;
+}
+function showAddress(name){
+  const p = PAINTINGS.find(q=>q.id===name); if(!p) return;
+  document.title = p.title + ' in watercolour';
+  if(location.hash !== '#'+slugOf(p)) history[location.hash ? 'pushState' : 'replaceState'](null, '', '#'+slugOf(p));   // (Back returns to the painting before)
+}
+window.addEventListener('popstate', ()=>{ const id = fromAddress(); if(id && id !== current) goTo(id); });
 function goTo(name){
   if(name===current || switching) return;
+  showAddress(name);
   const p = PAINTINGS.find(q=>q.id===name) || { title:'the test scene' };
   if(p.heavy && !loaded[name]){ toast.textContent='Painting '+p.title+'…'; toast.classList.add('on'); }
   // the painting fades out to the paper, the new one is prepared, then fades in
@@ -2286,7 +2300,7 @@ function frame(now){
 
 // the first painting opens (or ?scene=<id>, which can also open the test scene); the pavilion is drawn while it loads
 fit(); setMood(0,false);
-{ const want = new URLSearchParams(location.search).get('scene'), first = (want && MODELS[want]) ? want : PAINTINGS[0].id;
+{ const want = fromAddress(), first = want || PAINTINGS[0].id;
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>canvas.classList.remove('faded'), 80); }

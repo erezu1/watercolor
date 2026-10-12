@@ -2,6 +2,8 @@
 
 A 3D model repainted live in watercolour, stroke by stroke, as you turn it. Open https://erezu1.github.io/watercolor/.
 
+Each painting has its own address, e.g. https://erezu1.github.io/watercolor/#lighthouse or #moomin-house.
+
 This repository holds only the published page (one self-contained `index.html`).
 
 ## Credits and licences
