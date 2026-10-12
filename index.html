@@ -1157,9 +1157,9 @@ void main(){
       amount = 0.42*(1.0-hiAmt*lit*(1.0-cutIn))*mix(1.0,1.25,uDetail);   // on a detailed model the first wash carries each face's colour
       if(rr.w < 0.15+0.25*uLoose){ col = mix(Ab, -log(clamp(mix(uWashA,uWashB,hash12(e0.zw*97.0)),0.05,1.0))*1.6, 0.35); }   // a varied tint, but one per shape (no spots)
     } else if(layer<1.5){                                 // coffee / milk: the colour of the shape
-      amount = 0.62*(1.0-0.75*hiAmt*lit*(1.0-cutIn))*(1.0+0.5*cutIn)*(1.0+0.5*ht*uShadeK);
+      amount = 0.62*(1.0-0.75*hiAmt*lit*(1.0-cutIn))*(1.0+0.5*cutIn)*(1.0+0.9*ht*uShadeK);
       amount *= mix(1.18, 0.70, smoothstep(0.25, 0.90, sP)*hasShape(e0));   // value: a diluted wash where the plane is lit, a richer one where it turns away
-      col = Ab*(1.0 + (rr.y-0.5)*0.40*vec3(-0.6,0.05,0.6)) + uWarm*lit*0.8 + (uShadow*1.1 + Ab*0.25)*ht*uShadeK;   // a plane turning away: a little darker and cooler — its OWN colour, not a blue (a white sign went blue)
+      col = Ab*(1.0 + (rr.y-0.5)*0.40*vec3(-0.6,0.05,0.6)) + uWarm*lit*0.8 + (uShadow*1.7 + Ab*0.35)*ht*uShadeK;   // a plane turning away: a little darker and cooler — its OWN colour, not a blue (a white sign went blue)
       if(uDbgP > 0.5){ col = vec3(0.05) + vec3(0.0,2.5,2.5)*ht + vec3(2.5,2.5,0.0)*(1.0-roomy); amount = 0.8; }   // debug: halftone (red), dropped as too small (blue)
     } else if(layer<2.5){                                 // the shadow passage: cool, transparent, carrying some local colour
       if(mode > 1.5){ float top = max(ramp.x, max(ramp.y, ramp.w)); amount = smoothstep(0.15, 0.30, top)*uShadeK; }   // graded: see the profile
@@ -1299,8 +1299,12 @@ void main(){
   float soft = mix(mix(0.06, 0.40, vP.x), 0.6, max(tf, vDis));
   float a = 1.0 - smoothstep(1.0-soft, 1.0, r);
   if(vShp.z > 0.5){                                      // cut in along its object's outline (not the trail of a moved stroke: that dissolves freely)
-    vec4 e = texture2D(tShapeS, gl_FragCoord.xy/uRes);
-    float mine = step(0.25, e.z)*(1.0 - step(7e-4, abs(e.z - vShp.x) + abs(e.w - vShp.y)));
+    float mine = 0.0;                                    // (4 sub-pixel samples: a smooth edge, not stair-steps once scaled up)
+    for(int k=0;k<4;k++){
+      vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
+      vec4 e = texture2D(tShapeS, (gl_FragCoord.xy + o*1.6)/uRes);
+      mine += 0.25*step(0.25, e.z)*(1.0 - step(7e-4, abs(e.z - vShp.x) + abs(e.w - vShp.y)));
+    }
     a *= mix(mine, 1.0, clamp(vTr.x, 0.0, 1.0));
   }
   // washing out: the pigment thins (in soft blooms) while the wet paint stays a little longer, so a line pales and
@@ -1591,14 +1595,19 @@ layout(location=2) out highp vec4 oF;
 vec3 octDec(vec2 e){ e = e*2.0-1.0; vec3 n = vec3(e, 1.0-abs(e.x)-abs(e.y)); float t = max(-n.z, 0.0);
   n.x += n.x >= 0.0 ? -t : t; n.y += n.y >= 0.0 ? -t : t; return normalize(n); }
 float mv(float s, float cst){ float sh = 1.0-smoothstep(0.05, 0.14, s); return (sh + 0.18*(1.0-smoothstep(0.30, 0.70, s))*(1.0-sh))*(1.0 + 0.45*cst); }
+float hashW(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 void main(){
   vec4 d0 = texture(tData, vUv), e0 = texture(tShape, vUv); vec3 g0 = sqrt(texture(tColor, vUv).rgb);
   vec4 f0 = uFirst > 0.5 ? vec4(1.0) : texture(tF, vUv);
   vec4 sA = texture(tA, vUv), sB = texture(tB, vUv); float wA = 1.0, wB = 1.0, fA = f0.r, fB = f0.g;
+  // each pixel's flow is tilted a little at random: flowing exactly along pixel rows and columns left streaks and steps
+  vec2 gp = gl_FragCoord.xy*0.11; vec2 gi = floor(gp), gf = fract(gp); gf = gf*gf*(3.0-2.0*gf);   // (smooth: per-pixel randomness speckled the edges)
+  float nW = mix(mix(hashW(gi), hashW(gi+vec2(1.0,0.0)), gf.x), mix(hashW(gi+vec2(0.0,1.0)), hashW(gi+vec2(1.0,1.0)), gf.x), gf.y);
+  float ang = (nW - 0.5)*0.9; vec2 stp = mat2(cos(ang), sin(ang), -sin(ang), cos(ang))*uStep;
   for(int side=-1; side<=1; side+=2){                   // the paint flows out each way until it meets a border
     float zp = d0.b*uDR, cp = d0.g; vec3 np = octDec(e0.xy); float okA = d0.a, okB = d0.a;
     for(int k=1;k<=4;k++){
-      vec2 q = vUv + uStep*float(side*k);
+      vec2 q = vUv + stp*float(side*k);
       vec4 d = texture(tData, q), e = texture(tShape, q); vec3 n = octDec(e.xy);
       // the paint flows on until it meets a border you would see: another piece of a different colour, a step in
       // depth, a crease within the piece
@@ -1615,10 +1624,15 @@ void main(){
       float castEdge = step(0.5, abs(d.g - d0.g));
       // one shape: one wash — but shadow paint does not run from deep shade out into the light (on a narrow column
       // it would flood the lit side); between nearby values it still flows, so a turning form stays soft
-      okB *= d.a*max(same*step(0.80, dot(n, np))*(1.0-castEdge)*(1.0-smoothstep(0.35, 0.75, dmv)), (1.0-same)*band)*(1.0-step(0.15, abs(d.b*uDR-zp)));
+      // (between pieces the shadow flows on across a small step in depth when both sides are the same shade: one
+      // passage over a shaded facade full of balconies and signs, instead of dabs with paper between them)
+      float inSh = step(0.5, mv(texture(tColor, q).a, d.g))*step(0.5, mv(texture(tColor, vUv).a, d0.g));
+      float zTol = mix(0.15, 0.6, (1.0-same)*inSh*band);
+      okB *= d.a*max(same*step(0.80, dot(n, np))*(1.0-castEdge)*(1.0-smoothstep(0.35, 0.75, dmv)), (1.0-same)*band)*(1.0-step(zTol, abs(d.b*uDR-zp)));
       vec4 f = uFirst > 0.5 ? vec4(1.0) : texture(tF, q);
-      sA += okA*texture(tA, q); wA += okA; fA += okA*f.r;
-      sB += okB*texture(tB, q); wB += okB; fB += okB*f.g;
+      float gk = exp(-float(k*k)/7.0);                 // (fading with distance: an equal-weight box, run across then down, left rectangles)
+      sA += gk*okA*texture(tA, q); wA += gk*okA; fA += okA*f.r;
+      sB += gk*okB*texture(tB, q); wB += gk*okB; fB += okB*f.g;
       zp = d.b*uDR; np = n;
     }
   }
@@ -1665,10 +1679,12 @@ void main(){
   vec2 pp = gl_FragCoord.xy/uKi;
   // (granulation here is COARSE, a few pixels across: this pass runs below screen resolution, and noise finer than a
   // pixel came out as blocky 'pixelated' mottling once scaled up. The fine paper grain is added in FINAL_FS.)
-  float paperH = 0.60*vn(pp*0.18) + 0.40*vn(pp*0.42+3.0);
+  // (on ROTATED grids: value noise on the pixel grid shows square cells, which read as pixelation in dark washes)
+  vec2 pr1 = mat2(0.80, -0.60, 0.60, 0.80)*pp, pr2 = mat2(0.28, 0.96, -0.96, 0.28)*pp;
+  float paperH = 0.60*vn(pr1*0.16) + 0.40*vn(pr2*0.33+3.0);
   float nz = (vn(pp*0.14)-0.5)*0.07 + (vn(pp*0.035)-0.5)*0.12;            // the paper's tooth and the hand make the borders ragged
   float gran = smoothstep(0.25, 0.75, paperH);                          // pigment settling into the hollows of the paper
-  vec3 A0 = wash(tG0, 0.04, 0.40, nz, 0.25, 5.0)*(0.90+0.20*gran);
+  vec3 A0 = wash(tG0, 0.04, 0.40, nz, 0.25, 5.0)*(0.95+0.10*gran);
   vec4 wf = texture2D(tWF, vUv);
   // every shape is its own wash: where it meets another shape its pigment collects along the border, and the one
   // BEHIND is cut in a little more (so a light thing in front of a light thing keeps its outline)
@@ -1694,10 +1710,10 @@ void main(){
   float shapeEdge = border*(0.55 + 0.9*behind)*(0.8 + 0.4*vn(pp*0.2));
   // the blending is a process in time: fresh paint shows as it was put down, then merges with its neighbours (by the
   // same rules) over a fraction of a second. E is how much blending has happened so far.
-  vec3 A1d = wetWash(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, 0.0)*(0.95+0.10*gran);
-  vec3 A2d = wetWash(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, 0.0)*(0.78+0.44*gran);
-  vec3 A1w = wetWash(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, uWetOn)*(0.95+0.10*gran);
-  vec3 A2w = wetWash(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, uWetOn)*(0.78+0.44*gran);
+  vec3 A1d = wetWash(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, 0.0)*(0.97+0.06*gran);
+  vec3 A2d = wetWash(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, 0.0)*(0.90+0.20*gran);   // (was ±22%: blocky mottling in shadows)
+  vec3 A1w = wetWash(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, uWetOn)*(0.97+0.06*gran);
+  vec3 A2w = wetWash(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, uWetOn)*(0.90+0.20*gran);
   // where paint has just been laid down (more paint than a moment ago) it is FRESH: it stays as painted and blends
   // over ~0.35 s; paint that was already there (a stroke just following its spot) stays blended
   float rawNow = dot(A1d + A2d, vec3(0.3333)), rawPrev = texture2D(tAprev, vUv).a;
@@ -1749,7 +1765,6 @@ void main(){
   vec2 pp = gl_FragCoord.xy/uKf;
   float paperH = 0.55*vn(pp*0.45) + 0.30*vn(pp*1.1+3.0) + 0.15*vn(pp*2.6+9.0);
   vec3 A = texture2D(tAbs, uv).rgb;
-  A *= 0.92 + 0.16*smoothstep(0.30, 0.75, paperH);       // fine granulation: pigment in the paper's tooth, at screen resolution
   float pShade = 0.935 + 0.13*paperH;
   float vig = 1.0;                                       // (no darkened edges: the paper is the whole page)
   vec3 col = uPaper*pShade*vig*exp(-A);
