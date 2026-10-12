@@ -1461,12 +1461,12 @@ void stateMain(){
   vec2 dA2 = q4.w > 0.5 ? p4.xy - q4.yz : vec2(0.0); if(length(dA2) > 3.0*size + 60.0*uK) dA2 = vec2(0.0);
   if(!follow && !letGo && !big && carried + length(dA2) < 0.8*size + 3.0*uK && (moving || uRestT < 0.25 + 1.0*h)){
     status = 3.0; o0 = vec4(q0.xy + dA2, q0.zw); o1 = vec4(-(carried + length(dA2)) - 1e-3, s1, hw, q1.w); o2 = q2; o3 = q3;
-    o4 = vec4(q4.x, p4.xy, 1.0); o5 = vec4(trail*exp(-uDt/0.10), 0.0, 0.0); return;
+    o4 = vec4(q4.x, p4.xy, 1.0); o5 = vec4(trail*exp(-uDt/0.06), 0.0, 0.0); return;
   }
   if(!follow && !letGo && !big) letGo = true;
   if(!follow && !letGo){                                  // its goal is gone (hidden, thinned out): a moment's wait
-    if(s0 > -0.15){ status = 4.0; o0 = q0; o1 = vec4(min(s0, 0.0) - uDt, s1, hw, q1.w); o2 = q2; o3 = q3; o4 = vec4(q4.x, p4.xy, 1.0);
-      o5 = vec4(trail*exp(-uDt/0.10), 0.0, 0.0); return; }
+    if(s0 > -0.08){ status = 4.0; o0 = q0; o1 = vec4(min(s0, 0.0) - uDt, s1, hw, q1.w); o2 = q2; o3 = q3; o4 = vec4(q4.x, p4.xy, 1.0);
+      o5 = vec4(trail*exp(-uDt/0.06), 0.0, 0.0); return; }
     letGo = true;                                         // (a plan that flickers off for a frame changes nothing)
   }
   if(follow){
@@ -1496,8 +1496,8 @@ void stateMain(){
     // THE TRAIL: where it was stays painted (the stroke is swept from its old place to its new one: a vertical stroke
     // moved from x=0 to x=5 paints the rectangle 0..5), and that old part then dries back toward the new place
     vec2 moved = 0.5*(nA + nB) - 0.5*(A + B);
-    vec2 D = growing ? vec2(0.0) : (trail - moved)*exp(-uDt/(moving ? 0.18 : 0.08));
-    float Dmax = 2.5*max(size, sizeG) + 24.0*uK;
+    vec2 D = growing ? vec2(0.0) : (trail - moved)*exp(-uDt/(moving ? 0.09 : 0.05));   // (user: the drag of strokes should go away faster)
+    float Dmax = 1.5*max(size, sizeG) + 14.0*uK;
     if(length(D) > Dmax) D *= Dmax/length(D);
     if(length(D) < 0.3) D = vec2(0.0);
     o5 = vec4(D, 0.0, 0.0);
@@ -1517,13 +1517,13 @@ void stateMain(){
   // let go: it DISSOLVES — gets smaller toward its middle, wetter and paler, all at once, in about a quarter second
   s0 = max(s0, 0.0);
   float thinL = 1.0 - smoothstep(2.5*uK, 6.0*uK, hw);    // (a fine line washes out where it is; a broad stroke shrinks)
-  float kS = (1.0 - exp(-uDt/0.12))*(1.0 - 0.85*thinL), mid = 0.5*(s0 + s1);
+  float kS = (1.0 - exp(-uDt/0.07))*(1.0 - 0.85*thinL), mid = 0.5*(s0 + s1);   // (user: strokes should disappear faster)
   s0 = mix(s0, mid, kS) + 1e-3; s1 = mix(s1, mid, kS);
   float hwN = hw*(1.0 - kS*0.7);
-  float a = q2.w*exp(-uDt/mix(0.22, 0.12, thinL));       // (a line washes out a little quicker)
+  float a = q2.w*exp(-uDt/mix(0.12, 0.07, thinL));       // (a line washes out a little quicker)
   if(hwN < 0.4 || a < 0.02){ clearOut(); return; }
   status = 5.0; o0 = q0; o1 = vec4(s0, s1, hwN, 3.0); o2 = vec4(q2.rgb, a); o3 = q3; o4 = q4;   // (w 3: dissolving, painted wet)
-  o5 = vec4(trail*exp(-uDt/0.08), 0.0, 0.0);
+  o5 = vec4(trail*exp(-uDt/0.05), 0.0, 0.0);
 }
 void main(){
   stateMain();
@@ -2061,7 +2061,7 @@ const CFG = {};
 // so the side you first see is lit (a fixed world sun put several models' opening views in their own shade)
 function lightFromView(yaw){
   const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)), r = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-  return r.multiplyScalar(-0.62).add(new THREE.Vector3(0, 0.80, 0)).addScaledVector(f, 0.40).normalize();
+  return r.multiplyScalar(-0.80).add(new THREE.Vector3(0, 0.66, 0)).addScaledVector(f, 0.22).normalize();   // (more from the side: from the front everything was lit and flat — the Dutch Mill)
 }
 const cfgFor = name => CFG[name] || (CFG[name] = (()=>{ const c = Object.assign(autoCfg(MODELS[name].root(), MODELS[name].fit), MODELS[name]);
   if(!MODELS[name].light && MODELS[name].yaw !== undefined) c.light = lightFromView(c.yaw); return c; })());
