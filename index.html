@@ -375,7 +375,9 @@ void main(){
   // on the side away from the sun, and a little from the ground below. Only the shade's own modelling uses it (the
   // painter still decides light or shadow from the sun alone): the shadow is darkest just past the light's edge
   // (the core) and lighter where it turns away (reflected light)
-  float fill = clamp(0.40*(0.5+0.5*N.y) + 0.45*max(0.0, dot(N, -uL)) + 0.20*max(0.0, -N.y), 0.0, 1.0);
+  // (the light bounced from the far side is weak: at 0.45 it lit the side facing away from the sun like a second sun)
+  vec3 Lh = normalize(vec3(-uL.x, 0.0, -uL.z) + 1e-5);
+  float fill = clamp(0.45*(0.5+0.5*N.y) + 0.15*max(0.0, dot(N, Lh)) + 0.25*max(0.0, -N.y), 0.0, 1.0);
   float fade = 0.0;
   if(uFade>0.5){ float rr = length(vObj.xz); fade = max(smoothstep(2.7,3.75,rr)*0.92, 1.0-smoothstep(0.2,0.6,abs(N.y))); }
   gC = vec4(albedo, s);
@@ -822,7 +824,7 @@ float sameShape(vec4 e, vec4 e0){ return hasShape(e)*hasShape(e0)*(1.0 - step(7e
 float modelV(float s, float cst){ float sh = inShade(s); return (sh + 0.18*halfTone(s)*(1.0-sh))*(1.0 + 0.45*cst); }   // halftone .. shadow
 // the shade's own modelling, from the reference's faint fill lights (tLine.b): the core of a shadow darker, the side
 // that reflected light reaches lighter, as a painter paints it. Used for the shadow pigment only, not for borders.
-float reflK(float fill){ return clamp(1.0 - 0.7*(fill - 0.35), 0.6, 1.3); }
+float reflK(float fill){ return clamp(1.0 - 0.9*(fill - 0.30), 0.7, 1.25); }
 float lum3(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
 float modelVR(float s, float cst, float fill){ float sh = inShade(s); return (sh*reflK(fill) + 0.18*halfTone(s)*(1.0-sh))*(1.0 + 0.45*cst); }
 float cS0 = 0.0;                                        // (the anchor's cast-shadow flag)
@@ -2135,7 +2137,7 @@ const paintingsEl = $('paintings'), picker = $('picker'), pickBtn = $('pickBtn')
 PAINTINGS.forEach(p=>{
   const li = document.createElement('li'), b = document.createElement('button');
   b.innerHTML = '<img alt="" src="'+thumb(p.id)+'"><span><span class="t">'+p.title+'</span><span class="d">'+p.desc+'</span></span>';
-  b.addEventListener('click', ()=>{ goTo(p.id); });
+  b.addEventListener('click', ()=>{ goTo(p.id); openPanel(null); });   // (the chooser closes: the new painting is what you want to see)
   b.dataset.id = p.id; li.appendChild(b); paintingsEl.appendChild(li);
 });
 function showPainting(name){
