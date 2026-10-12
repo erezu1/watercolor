@@ -536,7 +536,7 @@ const KIND_ID = { surf:0, line:9 };
 // so the planner can thin them out to an even covering of the PICTURE, whatever the view.
 function buildStrokes(root, countScale, skyN){
   countScale = countScale||1; skyN = skyN===undefined ? 4600 : skyN;
-  const TA=[], TN=[], TAR=[], TRO=[];
+  const TA=[], TN=[], TAR=[], TRO=[], TSH=[];
   root.updateMatrixWorld(true);
   const va=new THREE.Vector3(), vb=new THREE.Vector3(), vc=new THREE.Vector3(), e1=new THREE.Vector3(), e2=new THREE.Vector3();
   const na=new THREE.Vector3(), nb=new THREE.Vector3(), nc=new THREE.Vector3();
@@ -557,6 +557,7 @@ function buildStrokes(root, countScale, skyN){
       nb.fromBufferAttribute(nor,i1).applyMatrix3(nm).normalize();
       nc.fromBufferAttribute(nor,i2).applyMatrix3(nm).normalize();
       const role = 'surf';
+      const sh = g.attributes.aShape; TSH.push(sh ? sh.getX(i0)*1000 + sh.getY(i0) : 0);   // (which shape: for its long axis)
       TA.push(va.x,va.y,va.z, vb.x,vb.y,vb.z, vc.x,vc.y,vc.z);
       TN.push(na.x,na.y,na.z, nb.x,nb.y,nb.z, nc.x,nc.y,nc.z);
       TAR.push(area); TRO.push(role);
@@ -564,6 +565,7 @@ function buildStrokes(root, countScale, skyN){
   });
   const nT = TAR.length;
   const thin = findThinThings(TA, TAR, nT);
+  const planeAxis = planeAxes(TA, TN, TAR, TSH, nT);
   for(let i=0;i<nT;i++) if(thin.isLine[i]) TRO[i] = 'line';      // (not sown with surface strokes)
   const rg = mulberry32(2024);
   const nSeg = thin.chains.reduce((a,c)=>a+c.knots.length-1, 0);
@@ -587,6 +589,8 @@ function buildStrokes(root, countScale, skyN){
       contour.crossVectors(nrm,up);                         // around the form
       if(Math.abs(nrm.y) > 0.8){ const a=rg()*6.283; tan.set(Math.cos(a),0,Math.sin(a)); }   // a floor or roof: any way across it
       else { tan.copy(rr<0.6? tmp : contour); }                                                     // a wall: up it, or around the form
+      { const pa = planeAxis[lo];                         // ... unless the face is clearly long and narrow (a stair riser, a column,
+        if(pa && role !== 'line'){ tan.set(pa[0],pa[1],pa[2]); tan.addScaledVector(nrm, -tan.dot(nrm)); } }   // a frame): then along it
       if(tan.lengthSq()<1e-6) tan.set(1,0,0);
       tan.normalize();
       S.pos.set([px,py,pz],k*3); S.nor.set([nrm.x,nrm.y,nrm.z],k*3); S.tan.set([tan.x,tan.y,tan.z],k*3);
@@ -643,6 +647,35 @@ function buildStrokes(root, countScale, skyN){
   });
   if(k > STATE_S*STATE_S) console.warn('too many strokes', k);
   return { geos, pgeo, total:k };
+}
+// The long axis of each flat face of each shape (triangles of one shape with about the same normal), found once from
+// the 3D geometry: a stroke on a clearly elongated face runs along it. Decided in 3D, it does not change with the view
+// (deciding it from the picture made strokes swing 90 degrees on a sub-pixel turn).
+function planeAxes(TA, TN, TAR, TSH, nT){
+  const groups = new Map(), key = t => { if(!TSH[t]) return null;
+    const nx = TN[t*9]+TN[t*9+3]+TN[t*9+6], ny = TN[t*9+1]+TN[t*9+4]+TN[t*9+7], nz = TN[t*9+2]+TN[t*9+5]+TN[t*9+8], l = Math.hypot(nx,ny,nz)||1;
+    return TSH[t]+'|'+Math.round(nx/l*3)+','+Math.round(ny/l*3)+','+Math.round(nz/l*3); };
+  for(let t=0;t<nT;t++){ const k = key(t); if(k===null) continue; let g = groups.get(k);
+    if(!g){ g = { w:0, m:[0,0,0], C:[0,0,0,0,0,0], n:[0,0,0], tris:[] }; groups.set(k, g); }
+    for(let v=0;v<3;v++){ const w = TAR[t]/3, x = TA[t*9+v*3], y = TA[t*9+v*3+1], z = TA[t*9+v*3+2];
+      g.w += w; g.m[0] += w*x; g.m[1] += w*y; g.m[2] += w*z; g.C[0] += w*x*x; g.C[1] += w*x*y; g.C[2] += w*x*z; g.C[3] += w*y*y; g.C[4] += w*y*z; g.C[5] += w*z*z; }
+    for(let c=0;c<3;c++) g.n[c] += TN[t*9+c] + TN[t*9+3+c] + TN[t*9+6+c];
+    g.tris.push(t); }
+  const out = new Array(nT);
+  for(const g of groups.values()){
+    if(g.tris.length < 2) continue;
+    const m = g.m.map(v=>v/g.w), C = [g.C[0]/g.w-m[0]*m[0], g.C[1]/g.w-m[0]*m[1], g.C[2]/g.w-m[0]*m[2], g.C[3]/g.w-m[1]*m[1], g.C[4]/g.w-m[1]*m[2], g.C[5]/g.w-m[2]*m[2]];
+    const nl = Math.hypot(...g.n)||1, n = g.n.map(v=>v/nl);
+    const Cv = v => [C[0]*v[0]+C[1]*v[1]+C[2]*v[2], C[1]*v[0]+C[3]*v[1]+C[4]*v[2], C[2]*v[0]+C[4]*v[1]+C[5]*v[2]];
+    const inPlane = v => { const d = v[0]*n[0]+v[1]*n[1]+v[2]*n[2]; const r = [v[0]-d*n[0], v[1]-d*n[1], v[2]-d*n[2]]; const l = Math.hypot(...r)||1; return r.map(x=>x/l); };
+    let a = inPlane(Math.abs(n[1]) < 0.9 ? [0,1,0] : [1,0,0]);
+    for(let it=0;it<24;it++) a = inPlane(Cv(a));
+    const b = [n[1]*a[2]-n[2]*a[1], n[2]*a[0]-n[0]*a[2], n[0]*a[1]-n[1]*a[0]];
+    const la = Cv(a).reduce((s,x,i)=>s+x*a[i],0), lb = Cv(b).reduce((s,x,i)=>s+x*b[i],0);
+    if(la < 2.5*2.5*Math.max(lb, 1e-12)) continue;            // (long and narrow: more than 2.5 times longer than wide)
+    for(const t of g.tris) out[t] = a;
+  }
+  return out;
 }
 // Thin things, found in the geometry of ANY model: split the triangles into connected pieces (shared vertices); a piece
 // that is long and thin (a cable, rod, pole, antenna) gets a centre line — the average of its vertices in slices along
@@ -733,7 +766,7 @@ const PLAN_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape;
 uniform vec2 uRes; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
-uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK;   // (uShadeK: how strongly light and shade are told apart)
+uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR;   // (uShadeK: how strongly light and shade are told apart)
 uniform vec3 uShadow, uWarm, uWashA, uWashB, uSky, uSkyA, uSkyB;
 varying vec3 vPos; varying vec3 vNor; varying vec4 vClip; varying vec4 vClip2; varying float vNdv; varying vec4 vRnd; varying vec4 vInfo; varying float vDen;
 layout(location=0) out highp vec4 oS0;   // path: start (px), start heading, bend
@@ -787,25 +820,40 @@ float simAt(vec4 c, vec4 d, vec4 e, vec3 g0, float s0, float z0, vec4 e0, float 
   return d.a*shp*simz*mix(simc, sims, mode);
 }
 // the brush goes out from the anchor and stops at the first border: another shape, a jump in depth, or a crease
+// may the brush go on to q? (not across another shape, a step in depth, or a crease)
+bool okAt(vec2 q, float zp, vec3 np, float st, vec3 g0, float s0, vec4 e0, float tol, float mode, out float z, out vec3 nq){
+  vec4 d = texture2D(tData,q), e = texture2D(tShape,q); z = d.b*uDepthRange; nq = octDec(e.xy);
+  float inShape = sameShape(e, e0)*hasShape(e);
+  if(mode > -0.5 && (abs(z-zp) > 0.12 + 0.02*st || (inShape > 0.5 && dot(nq, np) < 0.80))) return false;
+  return simAt(texture2D(tColor,q), d, e, g0, s0, z, e0, tol, mode) >= 0.5;
+}
+// the brush goes out from the anchor and stops at the first border; where it meets one, the border's place is narrowed
+// down by halving (so a border moving by a pixel moves the stroke's end by about a pixel, not by a whole step)
 float traceOut(vec2 uv, vec2 dir, float st, int n, vec3 g0, float s0, float z0, vec4 e0, float tol, float mode){
-  float L = 0.0, zp = z0; vec3 np = octDec(e0.xy);
+  float L = 0.0, zp = z0, z; vec3 np = octDec(e0.xy), nq; float fail = -1.0;
+  bool passage = mode > 0.99 && mode < 1.5;
   for(int i=1;i<=6;i++){
     if(i>n) break;
-    vec2 q = uv + dir*(st*float(i))/uRes;
-    vec4 d = texture2D(tData,q), e = texture2D(tShape,q); float z = d.b*uDepthRange; vec3 nq = octDec(e.xy);
-    float inShape = sameShape(e, e0)*hasShape(e);
-    bool passage = mode > 0.99 && mode < 1.5;
-    if(mode > -0.5 && !passage && (abs(z-zp) > 0.12 + 0.02*st || (inShape > 0.5 && dot(nq, np) < 0.80))) break;   // (a crease: within a piece)
     if(mode > -0.5){                                      // half way, too: a thin plane (a stair riser) must not be stepped over
       vec2 qm = uv + dir*(st*(float(i)-0.5))/uRes; vec4 dm = texture2D(tData,qm), em = texture2D(tShape,qm);
-      if(hasShape(em) > 0.5 && dot(octDec(em.xy), np) < 0.80) break;
-      if(!passage && abs(dm.b*uDepthRange-zp) > 0.12 + 0.01*st) break;
+      if((hasShape(em) > 0.5 && dot(octDec(em.xy), np) < 0.80) || (!passage && abs(dm.b*uDepthRange-zp) > 0.12 + 0.01*st)){ fail = st*(float(i)-0.5); break; }
     }
-    if(passage && (abs(z-zp) > 0.12 + 0.02*st || (inShape > 0.5 && dot(nq, np) < 0.80))) break;   // (each plane its own shadow)
-    if(simAt(texture2D(tColor,q), d, e, g0, s0, z, e0, tol, mode) < 0.5) break;
+    if(!okAt(uv + dir*(st*float(i))/uRes, zp, np, st, g0, s0, e0, tol, mode, z, nq)){ fail = st*float(i); break; }
     L = st*float(i); zp = z; np = nq;
   }
-  return L + st*0.5 + (mode > -0.5 ? 1.3*uK : 0.0);   // (just past the border: neighbouring washes meet, no gap between them)
+  float end = L + st*0.5;
+  if(fail > 0.0){
+    float a = L, b = fail;
+    for(int k=0;k<2;k++){ float m = 0.5*(a+b); float zz; vec3 nn; if(okAt(uv + dir*m/uRes, zp, np, st*0.5, g0, s0, e0, tol, mode, zz, nn)) a = m; else b = m; }
+    end = 0.5*(a+b);
+  }
+  return end + (mode > -0.5 ? 1.3*uK : 0.0);             // (just past the border: neighbouring washes meet, no gap between them)
+}
+// blend two ORIENTATIONS (a stroke has no head or tail: mixing as vectors would flip it when the two disagree by ~90°)
+vec2 mixDir(vec2 a, vec2 b, float t){
+  vec2 a2 = vec2(a.x*a.x - a.y*a.y, 2.0*a.x*a.y), b2 = vec2(b.x*b.x - b.y*b.y, 2.0*b.x*b.y), m = mix(a2, b2, t);
+  if(dot(m,m) < 1e-8) return a;
+  float g = 0.5*atan(m.y, m.x); vec2 r = vec2(cos(g), sin(g)); return dot(r, a) < 0.0 ? -r : r;
 }
 vec3 harmonise(vec3 ab){ float m = dot(ab, vec3(0.3333)); return mix(ab, vec3(m), 0.22); }   // a limited, muted palette
 
@@ -818,7 +866,7 @@ void main(){
   // ---- the brush mark this stroke should be: centre, direction, half-length, half-width, pigment, amount
   vec2 tc = vec2(0.0), dirT = vec2(1.0,0.0); float hl = 1.0, hw = 1.0, amount = 0.0, vis = 0.0, wetS = 0.0; vec3 col = vec3(0.0);
   vec4 ramp = vec4(1.0, 0.0, 0.0, 0.0);
-  float thinK = 2.0, heldAmt = 0.0;                      // (for the memory: how near a thinned-out stroke is to being on)
+  float thinK = 2.0, heldAmt = 0.0; vec4 dbgV = vec4(0.0);   // (dbgV: test readout)                      // (for the memory: how near a thinned-out stroke is to being on)
 
   if(isSky){
     // the sky is a pale wash too, pinned to the sky itself and painted AROUND the subject (negative painting)
@@ -890,7 +938,12 @@ void main(){
     sz *= mix(1.0, 0.88, uDetail);                     // a dense, detailed model: a slightly finer brush
 
     // study the picture around the anchor: which nearby pixels belong to the same shape? (centre, axis, extent)
-    vec4 c0 = texture2D(tColor,uv); vec3 g0 = sqrt(c0.rgb); float s0 = c0.a; vec4 e0 = texture2D(tShape,uv);
+    vec4 c0 = texture2D(tColor,uv); vec4 e0 = texture2D(tShape,uv);
+    { vec4 cs = c0; float ns = 1.0;                       // (a few pixels of its own shape: one pixel of a detailed texture flickers)
+      for(int i=0;i<4;i++){ vec2 q = uv + vec2(i<2 ? -1.2 : 1.2, mod(float(i),2.0) < 0.5 ? -1.2 : 1.2)*uK/uRes;
+        float w = sameShape(texture2D(tShape,q), e0) + (1.0 - hasShape(e0))*0.0; cs += w*texture2D(tColor,q); ns += w; }
+      c0 = cs/ns; }
+    vec3 g0 = sqrt(c0.rgb); float s0 = c0.a;
     float cast0 = texture2D(tData, uv).g; cS0 = cast0;
     float tolBase = layer<0.5 ? mix(0.30, 0.22, uDetail) : layer<1.5 ? 0.16 : layer<2.5 ? 0.15 : layer<3.5 ? 0.12 : 0.09;
     float leak = rr.w*(0.2+0.8*uLoose);
@@ -908,8 +961,8 @@ void main(){
       for(int i=0;i<8;i++){
         float a = float(i)*0.7853982; vec2 q = uv + vec2(cos(a), sin(a))*sz*0.5/uRes;
         vec4 dq = texture2D(tData,q), eq = texture2D(tShape,q);
-        float edge = max(step(0.15, abs(dq.b*uDepthRange - z0)), max(hasShape(eq)*hasShape(e0)*step(dot(octDec(eq.xy), n0), 0.8),
-                     (1.0-sameShape(eq, e0))*hasShape(eq)*hasShape(e0)*step(0.08, length(sqrt(texture2D(tColor,q).rgb)-g0))));
+        float edge = max(smoothstep(0.08, 0.25, abs(dq.b*uDepthRange - z0)), max(hasShape(eq)*hasShape(e0)*smoothstep(0.88, 0.72, dot(octDec(eq.xy), n0)),
+                     (1.0-sameShape(eq, e0))*hasShape(eq)*hasShape(e0)*smoothstep(0.05, 0.12, length(sqrt(texture2D(tColor,q).rgb)-g0))));
         nearEdge = max(nearEdge, edge*dq.a);
       }
       sz *= 0.40;
@@ -917,7 +970,7 @@ void main(){
     float mode = layer<0.5 ? -1.0 : (layer>1.5 && layer<2.5) ? ((castHere || !bigShape) ? 1.0 : 2.0) : (layer>2.5 && layer<3.5) ? 0.5 : 0.0;
     float reach = layer>2.5 ? max(sz*0.6, 4.5*uK) : sz*0.9;
     float h = reach/2.0;
-    float W = 0.0; vec2 Wp = vec2(0.0); vec3 Wpp = vec3(0.0); vec3 Wc = vec3(0.0); float Ws = 0.0; float Wn = 0.0; vec2 Wno = vec2(0.0); float Bz = 0.0, Bw = 0.0, Ul = 0.0, Uw = 0.0, Nl = 0.0; vec2 Gl = vec2(0.0); float Gw = 0.0;
+    float W = 0.0; vec2 Wp = vec2(0.0); vec3 Wpp = vec3(0.0); vec3 Wc = vec3(0.0); float Ws = 0.0; float Wn = 0.0; vec2 Wno = vec2(0.0); float Bz = 0.0, Bw = 0.0, Ul = 0.0, Uw = 0.0, Nl = 0.0; vec2 Gl = vec2(0.0); float Gw = 0.0, Ps = 0.0, Pw = 0.0;
     if(vis > 0.02){                                    // a coarse look around: the shape's colour, light and main axis
       for(int j=-2;j<=2;j++){
         float prevS = -1.0;
@@ -927,7 +980,7 @@ void main(){
           vec4 c = texture2D(tColor,q); vec4 d = texture2D(tData,q); vec4 e = texture2D(tShape,q);
           float w = simAt(c, d, e, g0, s0, z0, e0, tol, mode);
           float wc = d.a*sameShape(e, e0)*step(0.8, dot(octDec(e.xy), octDec(e0.xy)));   // same shape and plane: how the light turns across it
-          Gl += wc*o*(c.a-s0); Gw += wc*dot(o,o);
+          Gl += wc*o*(c.a-s0); Gw += wc*dot(o,o); Ps += wc*c.a; Pw += wc;
           W += w; Wp += w*o; Wpp += w*vec3(o.x*o.x, o.x*o.y, o.y*o.y); Wc += c.rgb*w; Ws += c.a*w;
           if(prevS >= 0.0){ Bz += d.a*abs(c.a-prevS); Bw += d.a; }   // light flickering from sample to sample: blades, leaves
           prevS = c.a; Ul += d.a*dot(c.rgb, vec3(0.2126,0.7152,0.0722)); Uw += d.a;
@@ -954,13 +1007,13 @@ void main(){
     // direction: along the surface, turned toward the shape's own long axis
     vec2 d2 = (vClip2.xy/vClip2.w - ndc)*uRes;
     vec2 dirTan = length(d2)>0.5 ? normalize(d2) : vec2(cos(rr.z*6.283), sin(rr.z*6.283));
-    vec2 axisS = dot(axis,dirTan)<0.0 ? -axis : axis;
-    dirT = normalize(mix(dirTan, axisS, aniso*trust) + vec2(1e-4,0.0));
+    dirT = mixDir(dirTan, axis, 0.5*aniso*trust);          // (mostly its own 3D direction; the picture only nudges it)
     // a curved form: the light changes steadily across it. The local colour runs along the lines of equal light (bands
     // that merge into a graded wash), so it can keep to its plane of light without being chopped into scraps.
     vec2 gL = Gl/max(Gw,1e-3);                            // light change per pixel
     float curved = smoothstep(0.004, 0.012, length(gL)*h)*(mode > 1.5 ? 1.0 : 0.0);   // the modelling runs along the form
-    if(curved > 0.0){ vec2 iso = normalize(vec2(-gL.y, gL.x)+vec2(1e-5,0.0)); if(dot(iso,dirT)<0.0) iso=-iso; dirT = normalize(mix(dirT, iso, curved)); }
+    if(curved > 0.0){ vec2 iso = normalize(vec2(-gL.y, gL.x)+vec2(1e-5,0.0)); dirT = mixDir(dirT, iso, curved); }
+    dbgV.x = aniso*trust; dbgV.w = curved; dbgV.z = atan(dirTan.y, dirTan.x);
     float ang = (rr.z-0.5)*(0.35+0.8*uLoose)*(1.0-0.6*aniso*trust);
     dirT = vec2(dirT.x*cos(ang)-dirT.y*sin(ang), dirT.x*sin(ang)+dirT.y*cos(ang));
     float crev = smoothstep(0.08,0.30, Wn/25.0)*(1.0-smoothstep(0.65,0.9, Wn/25.0));
@@ -976,9 +1029,13 @@ void main(){
     if(vis > 0.02){
       float stL = hlDef/6.0, stW = hwDef/4.0;
       Lp = traceOut(uv, dirT, stL, 6, g0, s0, z0, e0, tol, mode); Lm = traceOut(uv, -dirT, stL, 6, g0, s0, z0, e0, tol, mode);
-      if(mode > -0.5 && !edgeDark){                       // a narrow plane (a riser, a frame): turn the brush to run along it
+      if(false){                                          // (the narrow-plane turn is now decided in 3D: planeAxes)
         float Cp = traceOut(uv, nT, stL, 6, g0, s0, z0, e0, tol, mode), Cm = traceOut(uv, -nT, stL, 6, g0, s0, z0, e0, tol, mode);
-        if(Cp + Cm > 1.4*(Lp + Lm)){ vec2 t = dirT; dirT = nT; nT = -t; Lp = Cp; Lm = Cm; }
+        float wN = smoothstep(1.15, 1.65, (Cp + Cm)/max(Lp + Lm, 1e-3));   // (it turns gradually as the plane gets narrower)
+        dbgV.y = wN;
+        if(wN > 0.999){ vec2 t = dirT; dirT = nT; nT = -t; Lp = Cp; Lm = Cm; }
+        else if(wN > 0.001){ dirT = mixDir(dirT, nT, wN); nT = vec2(-dirT.y, dirT.x);
+          Lp = traceOut(uv, dirT, stL, 6, g0, s0, z0, e0, tol, mode); Lm = traceOut(uv, -dirT, stL, 6, g0, s0, z0, e0, tol, mode); }
       }
       Bp = traceOut(uv, nT, stW, 4, g0, s0, z0, e0, tol, mode);   Bm = traceOut(uv, -nT, stW, 4, g0, s0, z0, e0, tol, mode);
     }
@@ -1027,7 +1084,7 @@ void main(){
     cutIn *= smoothstep(0.0, 0.15, lNear - lMe + 0.05);   // only where the nearer thing is as light as me or lighter: it needs the contrast
     float sat = (max(cS.r,max(cS.g,cS.b)) - min(cS.r,min(cS.g,cS.b)))/max(max(cS.r,max(cS.g,cS.b)), 1e-3);
     float hiAmt = 0.85*smoothstep(0.12, 0.60, lumA)*(1.0-smoothstep(0.25, 0.6, sat))*hasShape(e0);   // light, pale materials in the light: bare paper (never on slivers: grass would speckle)
-    float sP = hasShape(e0) > 0.5 ? s0 : s;               // the light of the plane the brush is on (not averaged over its neighbours)
+    float sP = hasShape(e0) > 0.5 ? (Pw > 0.5 ? Ps/Pw : s0) : s;   // the light of the plane the brush is on (averaged over that plane only)
     float lit = smoothstep(0.55,0.85,sP);
     float roundF = smoothstep(0.012, 0.030, length(Gl/max(Gw,1e-3))*h);   // the light turns steadily across it: a round form
     float shade = inShade(sP), ht = (1.0-smoothstep(0.45, 0.72, sP))*(1.0-shade)*hasShape(e0)*(1.0-roundF);   // only FLAT planes clearly turned away (a round form is modelled by the graded glaze)
@@ -1054,7 +1111,7 @@ void main(){
       D = max(D, 1.2*localDark);
       D *= smoothstep(0.5, 0.9, hl/max(hlDef,1e-3));                  // a crevice long enough to be worth a line (no dashes)
       amount = D*mix(1.0,0.75,uDetail);
-      if(amount < 0.18) amount = 0.0;
+      amount *= smoothstep(0.10, 0.24, amount);           // (a faint accent fades away rather than being cut off)
       col = mix(Ab*1.25, vec3(dot(Ab, vec3(0.3333))*1.1), mix(0.3, 0.7, uDetail)) + uShadow*1.6 + vec3(0.15);   // nearly neutral darks
       hl = min(hl, hlDef*1.6);
     } else if(layer<4.5){                                 // dry-brush flecks where the picture is busy (grass, leaves, rough stuff)
@@ -1068,7 +1125,7 @@ void main(){
     }
     if(layer < 2.5 && uDbgP < 0.5) amount *= roomy;
     if(uDbgP > 1.5 && layer > 1.5 && layer < 2.5){ col = mode > 1.5 ? vec3(2.5,0.1,2.5) : vec3(0.1,2.5,2.5); amount = max(amount, 0.0); }   // debug: graded (green) vs passage (red)
-    if(fine) amount *= nearEdge;
+    if(fine) amount *= smoothstep(0.15, 0.75, nearEdge);
     amount *= vis;
 
     // an even covering of the picture: switch on only as many strokes as are needed to cover their part of it
@@ -1100,6 +1157,7 @@ void main(){
   oS1 = wanted ? vec4(layer, GL, hw, 1.0 + wetK) : vec4(0.0);   // (x: its layer — the state starts it at 0; w: alive, plus how wet)
   oS2 = wanted ? vec4(col, amount) : vec4(0.0);
   oS3 = wanted ? ramp : vec4(1.0, 0.0, 0.0, 0.0);
+  if(uDbgR > 0.5 && ramp.z < 0.5) oS3 = vec4(dbgV.x, dbgV.y, 0.0, dbgV.w);   // (test readout; z must stay 0)
   vec2 anc = isSky ? tcPx : (vClip.xy/max(vClip.w,1e-3)*0.5+0.5)*uRes;
   oS4 = vec4(anc, vis, wanted ? (onNow ? 1.0 : clamp(thinK, 0.0, 0.999)) : 0.0);   // w: 1 = paint it; < 1: thinned out
 }`;
@@ -1193,7 +1251,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uCamDist:{value:20}, uRefDist:{value:20}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1},
+    uCamDist:{value:20}, uRefDist:{value:20}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -1407,7 +1465,7 @@ const QUAD_VS = `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(positio
 const AO_FS = `
 precision highp float;
 varying vec2 vUv;
-uniform sampler2D tColor; uniform sampler2D tData; uniform vec2 uResI; uniform float uKi, uDR, uFocal;
+uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShapeA; uniform vec2 uResI; uniform float uKi, uDR, uFocal;
 float zAt(vec2 q){ vec4 d = texture2D(tData, q); return d.a > 0.5 ? d.b*uDR : -1.0; }
 void main(){
   vec4 c = texture2D(tColor, vUv), d = texture2D(tData, vUv);
@@ -1430,6 +1488,18 @@ void main(){
     occ += dq.a*smoothstep(0.03, 0.15, dz)*(1.0 - smoothstep(0.6, 1.2, dz));
   }
   float ao = 1.0 - occ/12.0;                              // 1: open, flat or convex (never darkened); 0: deep in a crevice
+  // a steady picture to paint from: the colour is softened WITHIN each shape (same piece, same depth), so a texture's
+  // fine detail does not shimmer when the view moves by a fraction of a pixel; borders between shapes stay sharp
+  vec4 e0 = texture2D(tShapeA, vUv); vec3 cs = c.rgb; float ws = 1.0;
+  float Rb = 2.6*uKi;
+  for(int i=0;i<10;i++){
+    float a = float(i)*2.3999632 + 0.5, r = Rb*sqrt((float(i)+0.5)/10.0);
+    vec2 q = vUv + vec2(cos(a), sin(a))*r*px;
+    vec4 eq = texture2D(tShapeA, q); vec4 dq = texture2D(tData, q);
+    float w = dq.a*(1.0 - step(7e-4, abs(eq.z-e0.z) + abs(eq.w-e0.w)))*(1.0 - smoothstep(0.05, 0.25, abs(dq.b*uDR - z0)));
+    cs += w*texture2D(tColor, q).rgb; ws += w;
+  }
+  c.rgb = cs/ws;
   gl_FragColor = vec4(c.rgb*mix(0.82, 1.0, smoothstep(0.30, 0.80, ao)), c.a*mix(0.25, 1.0, smoothstep(0.08, 0.30, ao)));
 }`;
 const WET_FS = `
@@ -1638,7 +1708,7 @@ void main(){
 }`;
 
 const aoMat = new THREE.ShaderMaterial({
-  uniforms:{ tColor:{value:null}, tData:{value:null}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uDR:SHARED.uDepthRange, uFocal:{value:500} },
+  uniforms:{ tColor:{value:null}, tData:{value:null}, tShapeA:{value:null}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uDR:SHARED.uDepthRange, uFocal:{value:500} },
   vertexShader:QUAD_VS, fragmentShader:AO_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending
 });
 const aoScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), aoMat); q.frustumCulled=false; aoScene.add(q); }
@@ -1963,9 +2033,9 @@ const pointers = new Map(); let pinch0=0, zoom0=1;
 const hint = $('hint');
 function touch(){ if(!touched){ touched=true; hint.classList.add('gone'); } }
 canvas.addEventListener('pointerdown', e=>{
-  canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); touch();
-  view.vyaw=0; view.vpitch=0;
-  if(pointers.size===2){ const [a,b]=[...pointers.values()]; pinch0=Math.hypot(a.x-b.x,a.y-b.y); zoom0=view.zoom; }
+  canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY,h:[{t:e.timeStamp,x:e.clientX,y:e.clientY}]}); touch();
+  view.vyaw=0; view.vpitch=0; if(pointers.size===1) pinched=false;
+  if(pointers.size===2){ const [a,b]=[...pointers.values()]; pinch0=Math.hypot(a.x-b.x,a.y-b.y); zoom0=view.zoom; pinched=true; }
 });
 canvas.addEventListener('pointermove', e=>{
   const p = pointers.get(e.pointerId); if(!p) return;
@@ -1973,15 +2043,31 @@ canvas.addEventListener('pointermove', e=>{
   if(pointers.size===1){
     const dyaw = -dx*0.0072, dpitch = dy*0.0052;
     view.yaw += dyaw; view.pitch = Math.min(1.15, Math.max(0.10, view.pitch+dpitch));
-    const dt = Math.max(0.008, (e.timeStamp-(p.t||e.timeStamp-16))/1000); p.t=e.timeStamp;
-    view.vyaw += (dyaw/dt - view.vyaw)*0.35; view.vpitch += (dpitch/dt - view.vpitch)*0.35;
+    p.h.push({t:e.timeStamp, x:e.clientX, y:e.clientY}); while(p.h.length>2 && e.timeStamp-p.h[0].t > 120) p.h.shift();
   } else if(pointers.size===2){
     const [a,b]=[...pointers.values()]; const d=Math.hypot(a.x-b.x,a.y-b.y);
     if(pinch0>0) view.zoom = Math.min(1.7, Math.max(0.62, zoom0*pinch0/d));
   }
   dirty=true;
 });
-const endPtr = e=>{ pointers.delete(e.pointerId); if(pointers.size<2) pinch0=0; };
+// Letting go: the view coasts on at the finger's own speed over its last ~0.1 s (an average, so a burst of events
+// cannot fling it faster than the hand moved; nothing if the finger had stopped), and comes to rest in under ~0.5 s
+// (coastStep): a long slow creep at the end is exactly the slow motion that makes small strokes flicker.
+let pinched = false;
+function releaseSpeed(p, t){
+  const h = p.h; if(!h || h.length<2) return [0,0];
+  const b = h[h.length-1]; if(t - b.t > 60) return [0,0];
+  let a = h[0]; for(const q of h) if(b.t - q.t <= 100){ a = q; break; }
+  const span = (b.t - a.t)/1000; if(span < 0.025) return [0,0];
+  const vyaw = -(b.x-a.x)*0.0072/span, vpitch = (b.y-a.y)*0.0052/span;
+  return [Math.max(-2.2, Math.min(2.2, vyaw)), Math.max(-1.0, Math.min(1.0, vpitch))];
+}
+const endPtr = e=>{
+  const p = pointers.get(e.pointerId);
+  if(p && pointers.size===1 && !pinched && e.type==='pointerup'){ const [vy, vp] = releaseSpeed(p, e.timeStamp); view.vyaw = vy; view.vpitch = vp; }
+  pointers.delete(e.pointerId); if(pointers.size<2) pinch0=0;
+  if(pointers.size===1) for(const q of pointers.values()) q.h = [];   // (after a pinch: no coast from the second finger)
+};
 canvas.addEventListener('pointerup', endPtr); canvas.addEventListener('pointercancel', endPtr);
 canvas.addEventListener('wheel', e=>{ e.preventDefault(); touch(); view.zoom = Math.min(1.7, Math.max(0.62, view.zoom*Math.exp(e.deltaY*0.0012))); dirty=true; },{passive:false});
 canvas.addEventListener('keydown', e=>{
@@ -2017,7 +2103,7 @@ function fit(){
   rtRes = [0,1].map(()=>new THREE.WebGLMultipleRenderTargets(W,H,2,rtOpts)); // the painting (absorbance) + the blending so far
   rtWet = [0,1].map(()=>new THREE.WebGLMultipleRenderTargets(W,H,3,rtOpts)); // wet in wet: across, then down
   rtLit = new THREE.WebGLRenderTarget(W,H,rtOpts);                          // the reference colour + light, with occlusion
-  aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
+  aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.tShapeA.value = rtMain.texture[3]; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
   camera.aspect = W/H; camera.updateProjectionMatrix();
   const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtMain.texture[3]; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
   strokeMat.uniforms.uRes.value.set(W,H);
@@ -2101,6 +2187,8 @@ function render(dt){
   if(__sync) __sync('final');
 }
 
+// the coast slows by drag (∝ speed) plus a little friction, so it stops in finite time: from 1.5 rad/s in ~0.5 s
+function coastStep(v, dt){ const m = Math.max(0, Math.abs(v)*Math.exp(-5*dt) - 0.8*dt); return m < 0.01 ? 0 : Math.sign(v)*m; }
 let last = performance.now(), emaDt = 16, slowFrames = 0, born = last, animUntil = 0;
 function frame(now){
   requestAnimationFrame(frame);
@@ -2109,10 +2197,10 @@ function frame(now){
   if(!touched && !reduceMotion && now-born < 16000){        // the opening turn: a turn, a pause (details are painted), a turn ...
     const ph = ((now-born)/1000) % 3.2; if(ph < 1.6){ view.yaw += dt*0.32*Math.sin(Math.PI*ph/1.6)*1.57; dirty = true; } }
   if(pointers.size===0){
-    if(Math.abs(view.vyaw)>0.002 || Math.abs(view.vpitch)>0.002){
+    if(view.vyaw!==0 || view.vpitch!==0){
       view.yaw += view.vyaw*dt; view.pitch = Math.min(1.15, Math.max(0.10, view.pitch+view.vpitch*dt));
-      const damp = Math.exp(-dt*3.4); view.vyaw*=damp; view.vpitch*=damp; dirty = true;
-    } else { view.vyaw=0; view.vpitch=0; }
+      view.vyaw = coastStep(view.vyaw, dt); view.vpitch = coastStep(view.vpitch, dt); dirty = true;
+    }
   }
   if(showRaw!==showRawTarget){ showRaw += (showRawTarget-showRaw)*0.3; if(Math.abs(showRawTarget-showRaw)<0.003) showRaw=showRawTarget; dirty = true; }
   if(dirty) animUntil = now + 2200;                     // the strokes need a moment to finish growing / drying
@@ -2161,6 +2249,43 @@ window.__pavilion = { view, setScene, setMood:(i)=>setMood(i,false), render:()=>
     const r={missing:[0,0,0,0,0,0,0], on:[0,0,0,0,0,0,0], weak:[0,0,0,0,0,0,0], off:[0,0,0,0,0,0,0]};
     for(let i=0;i<n;i++){ const L=Math.round(P1[i*4])|0, on=P1[i*4+3]>0.5 && P2[i*4+3]>0.003 && P4[i*4+3]>0.999, alive=Q1[i*4+3]>0.5 && Q2[i*4+3]>0.002;
       if(on){ r.on[L]++; if(!alive) r.missing[L]++; else if(Q2[i*4+3] < 0.6*P2[i*4+3]) r.weak[L]++; else if(Math.hypot(Q0[i*4]-P0[i*4],Q0[i*4+1]-P0[i*4+1]) > 6) r.off[L]++; } }
+    return r; },
+  // (test) the plan's strokes, read back: for comparing two close views stroke by stroke
+  dbgR:(v)=>{ planMat.uniforms.uDbgR.value = v; },
+  planRead:()=>{ const gl=renderer.getContext(), n=STATE_S*STATE_S, out=[];
+    for(let i=0;i<5;i++){ const b=new Float32Array(n*4); renderer.setRenderTarget(rtPlan); gl.readBuffer(gl.COLOR_ATTACHMENT0+i); gl.readPixels(0,0,STATE_S,STATE_S,gl.RGBA,gl.FLOAT,b); out.push(b); }
+    gl.readBuffer(gl.COLOR_ATTACHMENT0); renderer.setRenderTarget(null); return out; },
+  planDiff:(dyaw)=>{
+    render(1/60); const A = window.__pavilion.planRead(); view.yaw += dyaw; render(1/60); const B = window.__pavilion.planRead(); view.yaw -= dyaw; render(1/60);
+    const n=STATE_S*STATE_S, k=planMat.uniforms.uK.value, L=()=>[0,0,0,0,0,0,0];
+    const r={ on:L(), flipOnOff:L(), thinFlip:L(), turned:L(), longer:L(), wider:L(), shifted:L(), amount:L(), colour:L(), graded:L(), anyBig:L() };
+    const cen=(P0,P1,i)=>{ const x=P0[i*4], y=P0[i*4+1], th=P0[i*4+2], kb=P0[i*4+3], s=0.5*P1[i*4+1]; if(Math.abs(kb*s)<1e-3) return [x+Math.cos(th)*s, y+Math.sin(th)*s];
+      return [x+(Math.sin(th+kb*s)-Math.sin(th))/kb, y+(Math.cos(th)-Math.cos(th+kb*s))/kb]; };
+    for(let i=0;i<n;i++){
+      const pa=A[1][i*4+3]>0.5 && A[2][i*4+3]>0.003, pb=B[1][i*4+3]>0.5 && B[2][i*4+3]>0.003;
+      const la=Math.round(A[1][i*4])|0, lay = pa ? la : (Math.round(B[1][i*4])|0);
+      const onA = pa && A[4][i*4+3]>0.999, onB = pb && B[4][i*4+3]>0.999;
+      if(!pa && !pb) continue;
+      if(onA) r.on[lay]++;
+      if(pa !== pb){ r.flipOnOff[lay]++; continue; }
+      if(onA !== onB){ r.thinFlip[lay]++; continue; }
+      if(!onA) continue;
+      let big=false;
+      // direction (a stroke has no head or tail)
+      let dth = Math.abs(((A[0][i*4+2]+0.5*A[0][i*4+3]*A[1][i*4+1]) - (B[0][i*4+2]+0.5*B[0][i*4+3]*B[1][i*4+1])) % Math.PI); dth = Math.min(dth, Math.PI-dth);
+      const la_=A[1][i*4+1]+2*A[1][i*4+2], lb_=B[1][i*4+1]+2*B[1][i*4+2];
+      if(dth > 0.35 && Math.max(la_,lb_) > 6*k){ r.turned[lay]++; big=true; if(lay===1 && (r.ex=r.ex||[]).length<40) r.ex.push([A[3][i*4],B[3][i*4],A[3][i*4+1],B[3][i*4+1],A[3][i*4+3],B[3][i*4+3], la_, lb_, dth].map(v=>+v.toFixed(2))); }
+      if(Math.abs(la_-lb_) > 0.3*Math.max(la_,lb_) + 2*k){ r.longer[lay]++; big=true; }
+      if(Math.abs(A[1][i*4+2]-B[1][i*4+2]) > 0.3*Math.max(A[1][i*4+2],B[1][i*4+2]) + k){ r.wider[lay]++; big=true; }
+      // the stroke's centre relative to its own anchor (the anchor's own motion removed)
+      const ca=cen(A[0],A[1],i), cb=cen(B[0],B[1],i), oa=[ca[0]-A[4][i*4], ca[1]-A[4][i*4+1]], ob=[cb[0]-B[4][i*4], cb[1]-B[4][i*4+1]];
+      if(Math.hypot(oa[0]-ob[0], oa[1]-ob[1]) > 0.25*Math.max(la_,lb_) + 2*k){ r.shifted[lay]++; big=true; }
+      if(Math.abs(A[2][i*4+3]-B[2][i*4+3]) > 0.3*Math.max(A[2][i*4+3],B[2][i*4+3])){ r.amount[lay]++; big=true; }
+      const dc=Math.hypot(A[2][i*4]-B[2][i*4], A[2][i*4+1]-B[2][i*4+1], A[2][i*4+2]-B[2][i*4+2]), mc=Math.hypot(A[2][i*4],A[2][i*4+1],A[2][i*4+2]);
+      if(dc > 0.25*mc){ r.colour[lay]++; big=true; }
+      if((A[3][i*4+2]>0.5) !== (B[3][i*4+2]>0.5)){ r.graded[lay]++; big=true; }
+      if(big) r.anyBig[lay]++;
+    }
     return r; },
   time:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4); render(); gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px); const t0=performance.now(); for(let i=0;i<n;i++){ render(); gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px); } return (performance.now()-t0)/n; } };
 requestAnimationFrame(t=>{ last=t; born=t; frame(t); });
