@@ -463,8 +463,11 @@ function tagShapes(root){
     for(let i=0;i<nV;i++){ const r=find(i); wv.fromBufferAttribute(pos,i).applyMatrix4(o.matrixWorld);
       let e=ext.get(r); if(!e){ e=[wv.x,wv.y,wv.z,wv.x,wv.y,wv.z]; ext.set(r,e); }
       e[0]=Math.min(e[0],wv.x); e[1]=Math.min(e[1],wv.y); e[2]=Math.min(e[2],wv.z); e[3]=Math.max(e[3],wv.x); e[4]=Math.max(e[4],wv.y); e[5]=Math.max(e[5],wv.z); }
+    // (only GRASS is left without shapes at this size: a model's own small solid parts — railing posts, a flag, a
+    // chimney top — are shapes too, so their strokes cut in at their edges instead of melting into grey clouds)
+    const ms = o.userData.role === 'grass' ? minSize : 0.25*minSize;
     const big=new Map(); for(const [r,e] of ext){ const dx=e[3]-e[0], dy=e[4]-e[1], dz=e[5]-e[2]; const sz=[dx,dy,dz].sort((a,b)=>b-a);
-      big.set(r, sz[0] > minSize && sz[1] > 0.25*minSize); }
+      big.set(r, sz[0] > ms && sz[1] > 0.25*ms); }
     const sh=new Float32Array(nV*2);
     for(let i=0;i<nV;i++){ const r=find(i), key=meshNo*1000003+r; if(!big.get(r)) continue; sh[i*2]=0.5+0.5*hash(key,1); sh[i*2+1]=0.5+0.5*hash(key,2); }
     g.setAttribute('aShape', new THREE.BufferAttribute(sh,2));
@@ -1279,6 +1282,7 @@ void main(){
   // stops exactly at that object's outline — a crisp side where the object ends, the rest of the mark a free brush shape
   vec4 eM = texture2D(tShapeS, (a.xy + arcOff(a.z, a.w, 0.5*(s0+s1)))/uRes);
   float cutOn = uCut*step(0.25, eM.z)*((layer > 0.5 && layer < 1.5) || (layer > 1.5 && layer < 2.5 && vRamp.z > 0.5) ? 1.0 : 0.0);
+  if(layer > 1.5 && layer < 2.5 && vRamp.z < 0.5) cutOn = 2.0*uCut;   // the shadow passage: cut to the SHADE (it stops where the light starts)
   vShp = vec3(eM.zw, cutOn);
 }`;
 
@@ -1286,7 +1290,7 @@ void main(){
 const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp;
-uniform sampler2D tShapeS; uniform vec2 uRes;
+uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform vec2 uRes;
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 float vn(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);
   return mix(mix(hash12(i),hash12(i+vec2(1,0)),u.x), mix(hash12(i+vec2(0,1)),hash12(i+vec2(1,1)),u.x), u.y); }
@@ -1299,6 +1303,16 @@ void main(){
   float tf = vTr.y > 0.01 ? clamp((vTr.x - (1.0 - vTr.y))/max(vTr.y, 1e-3), 0.0, 1.0) : 0.0;
   float soft = mix(mix(0.06, 0.40, vP.x), 0.6, max(tf, vDis));
   float a = 1.0 - smoothstep(1.0-soft, 1.0, r);
+  if(vShp.z > 1.5){                                      // a shadow is a shape: paint where there is shade, on the model
+    float sh = 0.0;
+    for(int k=0;k<4;k++){
+      vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
+      vec2 qq = (gl_FragCoord.xy + o*1.6)/uRes;
+      vec4 dq = texture2D(tDataS, qq);
+      sh += 0.25*dq.a*max(1.0 - smoothstep(0.10, 0.30, texture2D(tLitS, qq).a), dq.g);
+    }
+    a *= mix(sh, 1.0, clamp(vTr.x, 0.0, 1.0));
+  } else
   if(vShp.z > 0.5){                                      // cut in along its object's outline (not the trail of a moved stroke: that dissolves freely)
     float mine = 0.0;                                    // (4 sub-pixel samples: a smooth edge, not stair-steps once scaled up)
     for(int k=0;k<4;k++){
@@ -1341,7 +1355,7 @@ const planMat = new THREE.ShaderMaterial({
   vertexShader:PLAN_VS, fragmentShader:PLAN_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending
 });
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, uCut:{value:1} },
+  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, uCut:{value:1} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -2263,7 +2277,7 @@ function fit(){
   aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.tShapeA.value = rtMain.texture[3]; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
   camera.aspect = W/H; camera.updateProjectionMatrix();
   const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtMain.texture[3]; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
-  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtMain.texture[3];
+  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtMain.texture[3]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1];
   const Rz = resolveMat.uniforms; [0,1,2,3].forEach(i=>{ Rz['tG'+i].value = rtGlaze[i].texture; }); Rz.uResI.value.set(W,H); Rz.uKi.value = Math.min(W,H)/700;
   Rz.tShapeR.value = rtMain.texture[3]; Rz.tColorR.value = rtLit.texture; Rz.tDataR.value = rtMain.texture[1]; Rz.tW1.value = rtWet[1].texture[0]; Rz.tW2.value = rtWet[1].texture[1]; Rz.tWF.value = rtWet[1].texture[2];
   wetMat.uniforms.tColor.value = rtLit.texture; wetMat.uniforms.tData.value = rtMain.texture[1]; wetMat.uniforms.tShape.value = rtMain.texture[3];
