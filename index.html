@@ -999,7 +999,7 @@ void main(){
       if(seen){ if(r0 < 0) r0 = i; if(i - r0 > b1 - b0){ b0 = r0; b1 = i; } } else r0 = -1;
       vec4 dT = texture2D(tThinD, q);
       if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < max(tolZ, 2.2*vInfo.z + 0.008)){   // (a wide piece's surface is far from its centre line: the chimney)
-        vec4 cc = texture2D(tThinC, q); lc += cc.rgb*(0.7+0.3*cc.a); lw += 1.0;   // its own colour (mostly its material; light comes from the profile)
+        vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0;   // its material colour, darkened only by real shade (a white bar in half light stays white)
         float lOwn = dot(cc.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cc.a);
         vec4 bC = texture2D(tColor, q); float lBg = d.a > 0.5 ? dot(bC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*bC.a) : 0.85;
         cDiff += lOwn - lBg;                               // how it differs from what is behind it (the surfaces are painted without it)
@@ -1010,8 +1010,7 @@ void main(){
             vec4 dj = texture2D(tThinD, qj);
             bool on = dj.a > 0.5 && abs(c.w - dj.b*uDepthRange) < tolZ;   // (off the pole: its centre's value)
             vec2 qq = on ? qj : q; vec4 cj = texture2D(tThinC, qq);
-            float sh = inShade(cj.a);                    // the light there: sun, or in shade
-            vec3 v = cj.rgb*(0.4*(sh*(2.0 - reflK(0.35)) + (1.0-sh)) + 0.6*cj.a);
+            vec3 v = cj.rgb*exp(-shadeA(cj.a, dj.g, 0.35, dj.r));   // (as for surfaces: half light is not darker paint)
             if(j==0) pr0 += v; else if(j==1) pr1 += v; else pr2 += v;
           }
           pn += 1.0;
@@ -1042,8 +1041,8 @@ void main(){
                     clamp(-log(clamp(lum3(pr2), 0.03, 1.0))/Am, 0.35, 1.6));
       }
       float dk = smoothstep(0.45, 0.20, dot(own, vec3(0.2126,0.7152,0.0722)));   // (only a dark thing gets the firm dark accent)
-      col = harmonise(-log(clamp(own, 0.03, 1.0)))*mix(1.0, 1.15, dk) + (uShadow*0.6 + vec3(0.12))*dk + uShadow*0.15*(1.0-dk);   // a fine line
-      if(formed) col = harmonise(-log(clamp(own, 0.03, 1.0)))*1.05 + uShadow*0.15;  // a rod, a rib, a pole: its OWN colour; its light and shade come from the profile
+      col = harmonise(-log(clamp(own, 0.03, 1.0)))*mix(1.0, 1.15, dk) + (uShadow*0.6 + vec3(0.12))*dk + uShadow*0.15*(1.0-dk)*(1.0 - smoothstep(0.55, 0.80, lum3(own)));   // a fine line (a white one stays white)
+      if(formed) col = harmonise(-log(clamp(own, 0.03, 1.0)))*1.05 + uShadow*0.15*(1.0 - smoothstep(0.55, 0.80, lum3(own)));  // a rod, a rib, a pole: its OWN colour; its light and shade come from the profile
     }
   } else {
     vec2 ndc = vClip.xy/vClip.w; vec2 uv = ndc*0.5+0.5; float vz = vClip.w;
@@ -1402,12 +1401,12 @@ void main(){
   float tf = vTr.y > 0.01 ? clamp((vTr.x - (1.0 - vTr.y))/max(vTr.y, 1e-3), 0.0, 1.0) : 0.0;
   float soft = mix(mix(0.06, 0.40, vP.x), 0.6, max(tf, vDis));
   float a = 1.0 - smoothstep(1.0-soft, 1.0, r);
-  if(vRes > 0.5) a *= 1.0 - reserveAt(gl_FragCoord.xy/uRes)*(1.0 - clamp(vTr.x, 0.0, 1.0));
+  if(vRes > 0.5) a *= 1.0 - reserveAt(gl_FragCoord.xy/uRes);   // (also on a moved stroke's trail: it swept over the white frames while dragging)
   if(vLum.y > 0.5){                                      // LIGHTS ARE RESERVED: a stroke paints around another object that is clearly lighter
     vec2 uvp = gl_FragCoord.xy/uRes; vec4 eP = texture2D(tShapeS, uvp);
     if(eP.z >= 0.25 && abs(eP.z - vShp.x) + abs(eP.w - vShp.y) > 7e-4){
       vec4 mP = texture2D(tLitS, uvp); float lp = dot(mP.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*mP.a);
-      a *= 1.0 - smoothstep(0.12, 0.22, lp - vLum.x)*(1.0 - clamp(vTr.x, 0.0, 1.0));
+      a *= 1.0 - smoothstep(0.12, 0.22, lp - vLum.x);   // (trail too)
     }
   }
   if(vShp.z > 1.5){                                      // a shadow is a shape: paint where there is shade, on the model
