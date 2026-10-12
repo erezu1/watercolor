@@ -1470,9 +1470,9 @@ void main(){
       float sliverQ = (1.0 - step(0.25, texture2D(tShapeS, qq).z))*step(0.5, dq.a);   // (a grass blade is painted with what is around it: never a hole in the shadow)
       sh += 0.25*dq.a*max(max(1.0 - smoothstep(0.10, 0.30, texture2D(tLitS, qq).a), dq.g), sliverQ);
     }
-    a *= mix(sh, 1.0, clamp(vTr.x, 0.0, 1.0));
+    a *= sh;                                             // (the trail of a moved stroke too)
   } else
-  if(vShp.z > 0.5){                                      // cut in along its object's outline (not the trail of a moved stroke: that dissolves freely)
+  if(vShp.z > 0.5){                                      // cut in along its object's outline
     float mine = 0.0;                                    // (4 sub-pixel samples: a smooth edge, not stair-steps once scaled up)
     for(int k=0;k<4;k++){
       vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
@@ -1480,7 +1480,7 @@ void main(){
       float sliverM = (1.0 - step(0.25, e.z))*step(0.5, texture2D(tDataS, (gl_FragCoord.xy + o*1.6)/uRes).a);   // a grass blade ON the model (not the sky)
       mine += 0.25*max(step(0.25, e.z)*(1.0 - step(7e-4, abs(e.z - vShp.x) + abs(e.w - vShp.y))), sliverM);   // (blades are not a border: no holes)
     }
-    a *= mix(mine, 1.0, clamp(vTr.x, 0.0, 1.0));
+    a *= mine;   // (the TRAIL too: exempt, it painted outside the object while moving — a sail's beam looked twice as thick)
   }
   // washing out: the pigment thins (in soft blooms) while the wet paint stays a little longer, so a line pales and
   // spreads instead of getting shorter
