@@ -869,22 +869,35 @@ float modelV(float s, float cst){ float sh = inShade(s); return (sh + 0.18*halfT
 // that reflected light reaches lighter, as a painter paints it. Used for the shadow pigment only, not for borders.
 float reflK(float fill){ return clamp(1.0 - 0.9*(fill - 0.30), 0.7, 1.25); }
 float lum3(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
+// HOW DARK IS THIS SHADE, in the model? The 3D view lights a surface by sun + faint sky/bounce light; a shaded surface
+// is darker than the same material in the light by Llit/Lnow. The shadow glaze gives exactly that (as absorbance), so
+// shade on a white porch is a light grey and on dark wood a value step, as the model shows (it used to be one fixed,
+// strong, cool wash whatever the material: lavender dabs on white, black on dark wood). Halftones: glaze 1.
+float shadeA(float s, float cst, float fill, float face){
+  float Lf = 0.08 + 0.40*fill, sLit = cst > 0.5 ? max(face*2.0 - 1.0, 0.3) : 0.45;   // (form shade against a moderately lit face: with a raking sun the lit side gets no more)
+  float Llit = Lf + 0.95*pow(sLit, 1.3), Lnow = Lf + 0.95*pow(max(s, 0.0), 1.3);
+  return max(log(Llit/Lnow), 0.0)*(1.0 - smoothstep(0.05, 0.16, s));   // (real shade only: half light is the colour glaze's halftone)
+}
 float modelVR(float s, float cst, float fill){ float sh = inShade(s); return (sh*reflK(fill) + 0.18*halfTone(s)*(1.0-sh))*(1.0 + 0.45*cst); }
+// DEPTH LIMITS ARE RELATIVE TO THE VIEW: a step 'in depth' is measured against how far away the surface is (13 units:
+// the pavilion, for which the limits were tuned). A model framed from further away (the Moomin House at 30) otherwise
+// stopped its strokes and its wet flow at every floor board and stair
+float gZS = 1.0;
 float cS0 = 0.0;                                        // (the anchor's cast-shadow flag)
 float simAt(vec4 c, vec4 d, vec4 e, vec3 g0, float s0, float z0, vec4 e0, float tol, float mode){
   float simc = 1.0-smoothstep(tol*0.55, tol, length(sqrt(c.rgb)-g0));
   if(mode < -0.5) return d.a*simc;
-  float simz = 1.0-smoothstep(0.35,1.1,abs(d.b*uDepthRange-z0));
+  float simz = 1.0-smoothstep(0.35*gZS,1.1*gZS,abs(d.b*uDepthRange-z0));
   float same = sameShape(e, e0)*smoothstep(0.25, 0.55, dot(octDec(e.xy), octDec(e0.xy)));   // same piece, not its far side
   float sliver = max(1.0-hasShape(e), 1.0-hasShape(e0));
-  float alikeL = sliver*(1.0-smoothstep(0.10, 0.20, length(sqrt(c.rgb)-g0)))*(1.0-smoothstep(0.15, 0.5, abs(d.b*uDepthRange-z0)));
+  float alikeL = sliver*(1.0-smoothstep(0.10, 0.20, length(sqrt(c.rgb)-g0)))*(1.0-smoothstep(0.15*gZS, 0.5*gZS, abs(d.b*uDepthRange-z0)));
   if(mode > 1.5) return d.a*max(same, alikeL)*simz;
-  if(sliver > 0.5 && mode < 0.25) return d.a*(1.0-smoothstep(0.12, 0.26, length(sqrt(c.rgb)-g0)))*(1.0-smoothstep(0.2, 0.6, abs(d.b*uDepthRange-z0)));
+  if(sliver > 0.5 && mode < 0.25) return d.a*(1.0-smoothstep(0.12, 0.26, length(sqrt(c.rgb)-g0)))*(1.0-smoothstep(0.2*gZS, 0.6*gZS, abs(d.b*uDepthRange-z0)));
   // another piece only stops the brush where you would SEE a border: a change of colour, or a step in depth
-  float alike = (1.0-smoothstep(0.05, 0.10, length(sqrt(c.rgb)-g0)))*(1.0-smoothstep(0.08, 0.25, abs(d.b*uDepthRange-z0)));
+  float alike = (1.0-smoothstep(0.05, 0.10, length(sqrt(c.rgb)-g0)))*(1.0-smoothstep(0.08*gZS, 0.25*gZS, abs(d.b*uDepthRange-z0)));
   float shp = max(max(same, alike), alikeL);
   if(mode > 0.99){                                      // the shadow passage: one value band across neighbouring pieces
-    float simzF = 1.0-smoothstep(0.30, 0.70, abs(d.b*uDepthRange-z0));
+    float simzF = 1.0-smoothstep(0.30*gZS, 0.70*gZS, abs(d.b*uDepthRange-z0));
     return d.a*simzF*(1.0-smoothstep(0.10, 0.22, abs(modelV(c.a, d.g)-modelV(s0, cS0))));
   }
   float sims = mode > 0.99 ? 1.0-smoothstep(0.35, 0.65, abs(inShade(c.a)-inShade(s0))) : 1.0-smoothstep(tol*0.9, tol*1.7, abs(c.a-s0));
@@ -896,7 +909,7 @@ bool gNarrow = false;                                    // (a narrow form: its 
 bool okAt(vec2 q, float zp, vec3 np, float st, vec3 g0, float s0, vec4 e0, float tol, float mode, out float z, out vec3 nq){
   vec4 d = texture2D(tData,q), e = texture2D(tShape,q); z = d.b*uDepthRange; nq = octDec(e.xy);
   float inShape = sameShape(e, e0)*hasShape(e);
-  if(mode > -0.5 && (abs(z-zp) > 0.12 + 0.02*st || (inShape > 0.5 && dot(nq, np) < 0.80 && !gNarrow))) return false;
+  if(mode > -0.5 && (abs(z-zp) > (0.12 + 0.02*st)*gZS || (inShape > 0.5 && dot(nq, np) < 0.80 && !gNarrow))) return false;
   return simAt(texture2D(tColor,q), d, e, g0, s0, z, e0, tol, mode) >= 0.5;
 }
 // the brush goes out from the anchor and stops at the first border; where it meets one, the border's place is narrowed
@@ -907,8 +920,9 @@ float traceOut(vec2 uv, vec2 dir, float st, int n, vec3 g0, float s0, float z0, 
   for(int i=1;i<=6;i++){
     if(i>n) break;
     if(mode > -0.5){                                      // half way, too: a thin plane (a stair riser) must not be stepped over
+      // (the shadow passage goes on across small pieces in the same shade: a porch's posts and boards)
       vec2 qm = uv + dir*(st*(float(i)-0.5))/uRes; vec4 dm = texture2D(tData,qm), em = texture2D(tShape,qm);
-      if((hasShape(em) > 0.5 && dot(octDec(em.xy), np) < 0.80 && !(gNarrow && sameShape(em, e0) > 0.5)) || (!passage && abs(dm.b*uDepthRange-zp) > 0.12 + 0.01*st)){ fail = st*(float(i)-0.5); break; }
+      if((hasShape(em) > 0.5 && dot(octDec(em.xy), np) < 0.80 && !(gNarrow && sameShape(em, e0) > 0.5) && !(passage && sameShape(em, e0) < 0.5)) || (!passage && abs(dm.b*uDepthRange-zp) > (0.12 + 0.01*st)*gZS)){ fail = st*(float(i)-0.5); break; }
     }
     if(!okAt(uv + dir*(st*float(i))/uRes, zp, np, st, g0, s0, e0, tol, mode, z, nq)){ fail = st*float(i); break; }
     L = st*float(i); zp = z; np = nq;
@@ -1036,10 +1050,11 @@ void main(){
     float ndv = vNdv;
     bool onscreen = abs(ndc.x) < 1.15 && abs(ndc.y) < 1.15 && vClip.w > 0.0;
     float z0 = texture2D(tData, uv).b*uDepthRange;
-    vis = (1.0-smoothstep(0.08,0.60, vz-z0)) * smoothstep(-0.05,0.40, ndv);
+    gZS = clamp(z0/13.0, 0.7, 3.0);
+    vis = (1.0-smoothstep(0.08*gZS,0.60*gZS, vz-z0)) * smoothstep(-0.05,0.40, ndv);
     // hidden only by slivers just in front (grass behind grass): still visible as far as the painting goes, so a tiny
     // turn that swaps which blade is in front does not swap the strokes
-    if(hasShape(texture2D(tShape, uv)) < 0.5 && texture2D(tData, uv).a > 0.5 && vz - z0 < 0.5) vis = max(vis, smoothstep(-0.05,0.40, abs(ndv)));
+    if(hasShape(texture2D(tShape, uv)) < 0.5 && texture2D(tData, uv).a > 0.5 && vz - z0 < 0.5*gZS) vis = max(vis, smoothstep(-0.05,0.40, abs(ndv)));
     if(!onscreen) vis = 0.0;
 
     float distS = pow(uRefDist/uCamDist, 0.85);
@@ -1086,7 +1101,7 @@ void main(){
       for(int i=0;i<8;i++){
         float a = float(i)*0.7853982; vec2 q = uv + vec2(cos(a), sin(a))*sz*0.5/uRes;
         vec4 dq = texture2D(tData,q), eq = texture2D(tShape,q);
-        float edge = max(smoothstep(0.08, 0.25, abs(dq.b*uDepthRange - z0)), max(hasShape(eq)*hasShape(e0)*smoothstep(0.88, 0.72, dot(octDec(eq.xy), n0)),
+        float edge = max(smoothstep(0.08*gZS, 0.25*gZS, abs(dq.b*uDepthRange - z0)), max(hasShape(eq)*hasShape(e0)*smoothstep(0.88, 0.72, dot(octDec(eq.xy), n0)),
                      (1.0-sameShape(eq, e0))*hasShape(eq)*hasShape(e0)*smoothstep(0.05, 0.12, length(sqrt(texture2D(tColor,q).rgb)-g0))));
         nearEdge = max(nearEdge, edge*dq.a);
       }
@@ -1112,7 +1127,7 @@ void main(){
           if(prevS >= 0.0 && wc > 0.5){ Tz += abs(lr - prevR); Tw += 1.0; }   // the object's own TEXTURE varying (thatch, wood, brick)
           prevR = lr;
           prevS = c.a; Ul += d.a*dot(c.rgb, vec3(0.2126,0.7152,0.0722)); Uw += d.a;
-          float nearer = d.a*step(d.b*uDepthRange, z0-0.25);   // nearer surfaces around me: I am in a crevice / behind an edge
+          float nearer = d.a*step(d.b*uDepthRange, z0-0.25*gZS);   // nearer surfaces around me: I am in a crevice / behind an edge
           Wn += nearer; Wno += nearer*o; Nl += nearer*dot(c.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*c.a);
         }
       }
@@ -1187,8 +1202,8 @@ void main(){
       for(int i=0;i<5;i++){
         float t = float(i-2)*0.5; vec2 q = cq + nT*(t*hw)/uRes;
         vec4 eq = texture2D(tShape,q);
-        ww[i] = texture2D(tData,q).a*max(sameShape(eq, e0), 1.0-hasShape(e0));
-        vv[i] = modelVR(texture2D(tColor,q).a, texture2D(tData,q).g, texture2D(tLine,q).b);
+        ww[i] = texture2D(tData,q).a*max(sameShape(eq, e0)*step(0.8, dot(octDec(eq.xy), octDec(e0.xy))), 1.0-hasShape(e0));   // (its own PLANE: on a faceted tower the next face's shade must not ramp across a lit face)
+        vec4 dq = texture2D(tData,q); vv[i] = shadeA(texture2D(tColor,q).a, dq.g, texture2D(tLine,q).b, dq.r);   // (absorbance the model's shade asks for)
       }
       float vC = vv[2];
       float vL = ww[0] > 0.5 ? vv[0] : ww[1] > 0.5 ? vv[1] : vC;
@@ -1226,18 +1241,21 @@ void main(){
       amount = 0.42*(1.0-hiAmt*lit*(1.0-cutIn))*mix(1.0,1.25,uDetail);   // on a detailed model the first wash carries each face's colour
       if(rr.w < 0.15+0.25*uLoose){ col = mix(Ab, -log(clamp(mix(uWashA,uWashB,hash12(e0.zw*97.0)),0.05,1.0))*1.6, 0.35); }   // a varied tint, but one per shape (no spots)
     } else if(layer<1.5){                                 // coffee / milk: the colour of the shape
-      amount = 0.62*(1.0-0.75*hiAmt*lit*(1.0-cutIn))*(1.0+0.5*cutIn)*(1.0+0.9*ht*uShadeK);
+      amount = 0.62*(1.0-0.75*hiAmt*lit*(1.0-cutIn))*(1.0+0.5*cutIn)*(1.0+0.9*ht*mix(1.0, uShadeK, 0.35));
       amount *= mix(1.18, 0.70, smoothstep(0.25, 0.90, sP)*hasShape(e0));   // value: a diluted wash where the plane is lit, a richer one where it turns away
-      col = Ab*(1.0 + (rr.y-0.5)*0.40*vec3(-0.6,0.05,0.6)) + uWarm*lit*0.8 + (uShadow*1.7 + Ab*0.35)*ht*uShadeK;   // a plane turning away: a little darker and cooler — its OWN colour, not a blue (a white sign went blue)
+      col = Ab*(1.0 + (rr.y-0.5)*0.40*vec3(-0.6,0.05,0.6)) + uWarm*lit*0.8 + (uShadow*1.7*(1.0 - 0.5*paleK) + Ab*0.35)*ht*mix(1.0, uShadeK, 0.35);   // a plane turning away: a little darker and cooler — its OWN colour, not a blue (a white sign went blue)
       if(uDbgP > 0.5){ col = vec3(0.05) + vec3(0.0,2.5,2.5)*ht + vec3(2.5,2.5,0.0)*(1.0-roomy); amount = 0.8; }   // debug: halftone (red), dropped as too small (blue)
     } else if(layer<2.5){                                 // the shadow passage: cool, transparent, carrying some local colour
-      if(mode > 1.5){ float top = max(ramp.x, max(ramp.y, ramp.w)); amount = min(smoothstep(0.15, 0.30, top)*uShadeK, 1.0)*(narrowForm ? 0.7 : 1.0); }   // graded: see the profile (capped; a narrow form's shaded edge is a soft value, not a black dab)
+      float shK = mix(1.0, uShadeK, 0.25);               // (a model's extra contrast, gently: the values now come from the model)
+      if(mode > 1.5){ float top = max(ramp.x, max(ramp.y, ramp.w)); amount = smoothstep(0.10, 0.25, top)*shK*(narrowForm ? 0.85 : 1.0); }   // graded: the profile carries the absorbance
       else {                                               // a value band (halftone or shadow) across small pieces;
         float face = texture2D(tData, uv).r;              // in shadow a plane facing the sky stays a little lighter
-        amount = min(smoothstep(0.08, 0.20, modelV(s, cast0))*modelVR(s, cast0, texture2D(tLine, uv).b)*mix(1.25, 0.75, smoothstep(0.5, 0.95, face))*uShadeK, 1.15);   // (capped: with a strong shadeK deep shade went black)
+        amount = shadeA(s, cast0, texture2D(tLine, uv).b, face)*shK;   // the model's own shade value
       }
-      vec3 AbS = Ab*min(1.0, 0.75/max(dot(Ab, vec3(0.3333)), 1e-3));   // (a dark material — dark wood, slate — is already dark in its local colour: its shadow adds a value step, it does not go black)
-      col = uShadow*2.0 + AbS*(0.60 + 0.9*(uShadeK - 1.0));   // (more contrast: the shadow also deepens the material's own colour)
+      // colour: a cool grey carrying some of the material's own colour; its mean absorbance is 1 (amount says how much)
+      float mS = dot(uShadow, vec3(0.3333)), mA = dot(Ab, vec3(0.3333));
+      vec3 coolN = mix(uShadow/max(mS, 1e-3), vec3(1.0), 0.45), ownN = Ab/max(mA, 1e-3);
+      col = mix(coolN, ownN, 0.45*smoothstep(0.05, 0.40, mA));
     } else if(layer<3.5){                                 // cream / butter: small strong darks where the eye needs them
       float D = pocket ? smoothstep(0.15, 0.4, crev)*1.3*aniso : 0.0;   // a recess long enough to read as one (no spots)                            // (no thin lines in the light: they read as pencil; shape borders do that job)
       // a local dark: something much darker than what is around it (an eye, a window, a doorway) gets its dark, small and strong
@@ -1535,6 +1553,10 @@ void stateMain(){
   float size = (s1 - max(s0, 0.0)) + 2.0*hw;
   bool big = max(size, sizeG) > 22.0*uK;
   bool follow = false, letGo = drying;
+  // HIDDEN NOW (user: strokes that went behind something must go as it happens, not when the drag stops): the plan says
+  // its point on the model is out of sight (vis ~ 0: behind something nearer, turned away or off screen) — let go at
+  // once. (Only a goal that is merely thinned out or flickering is carried or waited for.)
+  if(!present && p4.z < 0.02) letGo = true;
   vec2 GA = p0.xy, GB = p0.xy + arcOff(p0.z, p0.w, p1.y); float gk = p0.w;
   if(!drying && present){
     if(length(A-GB) + length(B-GA) < length(A-GA) + length(B-GB)){ vec2 t = GA; GA = GB; GB = t; gk = -gk; }
@@ -1721,6 +1743,7 @@ void main(){
   float nW = mix(mix(hashW(gi), hashW(gi+vec2(1.0,0.0)), gf.x), mix(hashW(gi+vec2(0.0,1.0)), hashW(gi+vec2(1.0,1.0)), gf.x), gf.y);
   float ang = (nW - 0.5)*0.9; vec2 stp = mat2(cos(ang), sin(ang), -sin(ang), cos(ang))*uStep;
   for(int side=-1; side<=1; side+=2){                   // the paint flows out each way until it meets a border
+    float zsW = clamp(d0.b*uDR/13.0, 0.7, 3.0);   // (depth limits relative to the view, as in the planner)
     float zp = d0.b*uDR, cp = d0.g; vec3 np = octDec(e0.xy); float r0w = 1.0 - resW(vUv), okA = d0.a*r0w, okB = d0.a*r0w;
     for(int k=1;k<=4;k++){
       vec2 q = vUv + stp*float(side*k);
@@ -1733,7 +1756,7 @@ void main(){
       // (within one object the paint keeps to its own TEXTURE colour: a sign's blue frame must not flood its white panel;
       // light and shade are not in this colour, so the shades of one colour still blend)
       float sameCol = 1.0 - smoothstep(0.10, 0.20, length(sqrt(texture(tColor, q).rgb) - g0));
-      float cont = d.a*max(same*step(0.80, dot(n, np))*sameCol, alike)*(1.0-step(0.15, abs(d.b*uDR-zp)));
+      float cont = d.a*max(same*step(0.80, dot(n, np))*sameCol, alike)*(1.0-step(0.15*zsW, abs(d.b*uDR-zp)));
       float rq = 1.0 - resW(q); okA *= cont*rq;
       float dmv = abs(mv(texture(tColor, q).a, d.g)-mv(texture(tColor, vUv).a, d0.g));
       float band = 1.0-step(0.12, dmv);
@@ -1743,7 +1766,7 @@ void main(){
       // (between pieces the shadow flows on across a small step in depth when both sides are the same shade: one
       // passage over a shaded facade full of balconies and signs, instead of dabs with paper between them)
       float inSh = step(0.5, mv(texture(tColor, q).a, d.g))*step(0.5, mv(texture(tColor, vUv).a, d0.g));
-      float zTol = mix(0.15, 0.6, (1.0-same)*inSh*band);
+      float zTol = mix(0.15, 0.6, (1.0-same)*inSh*band)*zsW;
       okB *= d.a*max(same*step(0.80, dot(n, np))*(1.0-castEdge)*(1.0-smoothstep(0.35, 0.75, dmv)), (1.0-same)*band)*(1.0-step(zTol, abs(d.b*uDR-zp)))*rq;
       vec4 f = uFirst > 0.5 ? vec4(1.0) : texture(tF, q);
       float gk = exp(-float(k*k)/7.0);                 // (fading with distance: an equal-weight box, run across then down, left rectangles)
@@ -1811,7 +1834,7 @@ void main(){
     float ang = float(i)*0.7853982 + (i<4 ? 0.0 : 0.39); vec2 o = vec2(cos(ang), sin(ang))*(i<4 ? 3.0 : 8.0)*uKi/uResI;
     vec4 e = texture2D(tShapeR, vUv+o), dd = texture2D(tDataR, vUv+o), e2 = texture2D(tShapeR, vUv+o*2.5);
     vec4 cc = texture2D(tColorR, vUv+o);
-    float seen = max(step(0.06, abs(dd.b*uDR-zC)), smoothstep(0.05, 0.12, length(sqrt(cc.rgb)-sqrt(texture2D(tColorR, vUv).rgb))));
+    float seen = max(step(0.06*clamp(zC/13.0, 0.7, 3.0), abs(dd.b*uDR-zC)), smoothstep(0.05, 0.12, length(sqrt(cc.rgb)-sqrt(texture2D(tColorR, vUv).rgb))));
     float other = step(7e-4, abs(e.z-eC.z)+abs(e.w-eC.w))*dd.a*covC*seen*step(0.25, e.z)*step(0.25, eC.z);   // a border you would see
     vec4 eb = texture2D(tShapeR, vUv-o*2.0);
     float wide = (1.0 - step(7e-4, abs(e2.z-e.z)+abs(e2.w-e.w)))         // neither shape is a sliver (grass blades, leaves)
@@ -2500,7 +2523,7 @@ fit(); setMood(0,false);
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>canvas.classList.remove('faded'), 80); }
-window.__pavilion = { grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+window.__pavilion = { camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
   passes:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4), acc={}; let t=0;
