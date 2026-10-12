@@ -305,7 +305,13 @@ attribute vec3 aCol; attribute vec3 aUvT; varying vec3 vCol; varying vec3 vUvT;
 #endif
 attribute vec2 aShape; varying vec2 vShape;
 varying vec3 vObj; varying vec3 vN; varying float vZ;
+#ifdef GRASS
+attribute vec3 aRoot; varying vec3 vRoot;   // (a blade is lit like the ground at its foot)
+#endif
 void main(){
+#ifdef GRASS
+  vRoot = (modelMatrix*vec4(aRoot,1.0)).xyz;
+#endif
 #ifdef VCOL
   vCol = aCol; vUvT = aUvT;
 #endif
@@ -327,6 +333,9 @@ uniform sampler2D tShadow; uniform mat4 uLightVP; uniform mat4 uLightV;
 varying vec3 vCol; varying vec3 vUvT; uniform vec3 uTint; uniform sampler2D tAtlas; uniform float uAtlasG, uMulCol, uLift;
 #endif
 varying vec3 vObj; varying vec3 vN; varying float vZ; varying vec2 vShape;
+#ifdef GRASS
+varying vec3 vRoot;
+#endif
 layout(location=0) out highp vec4 gC;
 layout(location=1) out highp vec4 gD;
 layout(location=2) out highp vec4 gL;
@@ -366,9 +375,15 @@ void main(){
 #else
   vec3 albedo = uAlbedo;
 #endif
+#ifdef GRASS
+  N = vec3(0.0, 1.0, 0.0);                              // grass is part of the ground: the ground's light, the shadow at the blade's foot
+  vec3 shP = vRoot;
+#else
+  vec3 shP = vObj;
+#endif
   float ndl = dot(N,uL);
   float sLine = clamp(mix(ndl*0.5+0.5, N.y*0.5+0.5, 0.2), 0.0, 1.0);
-  float sh = shadowAt(vObj, ndl);
+  float sh = shadowAt(shP, ndl);
   float s = clamp(ndl, 0.0, 1.0)*sh;                     // the light: 0 = turned away or in a cast shadow, 1 = facing the sun
   float castSh = (1.0-sh)*smoothstep(0.02, 0.12, ndl);      // facing the sun, but something is in the way
   // shade is never flat: a few faint lights besides the sun — the sky from above, light bounced back from the lit world
@@ -399,6 +414,7 @@ function matFor(role){
       glslVersion: THREE.GLSL3,
       uniforms:{ uL:SHARED.uL, uDepthRange:SHARED.uDepthRange, uLightVP:SHARED.uLightVP, uLightV:SHARED.uLightV, tShadow:SHARED.tShadow,
                  uAlbedo:{value:new THREE.Vector3(1,1,1)}, uFade:{value:role==='ground'?1:0} },
+      defines: role==='grass' ? { GRASS:'' } : {},
       vertexShader:SCENE_VS, fragmentShader:SCENE_FS
     });
   }
@@ -467,7 +483,7 @@ function tagShapes(root){
       e[0]=Math.min(e[0],wv.x); e[1]=Math.min(e[1],wv.y); e[2]=Math.min(e[2],wv.z); e[3]=Math.max(e[3],wv.x); e[4]=Math.max(e[4],wv.y); e[5]=Math.max(e[5],wv.z); }
     // (only GRASS is left without shapes at this size: a model's own small solid parts — railing posts, a flag, a
     // chimney top — are shapes too, so their strokes cut in at their edges instead of melting into grey clouds)
-    const ms = o.userData.role === 'grass' ? minSize : 0.25*minSize;
+    const ms = o.userData.role === 'grass' ? Infinity : 0.25*minSize;   // (grass is never a shape: it is painted as part of the ground)
     const big=new Map(); for(const [r,e] of ext){ const dx=e[3]-e[0], dy=e[4]-e[1], dz=e[5]-e[2]; const sz=[dx,dy,dz].sort((a,b)=>b-a);
       big.set(r, sz[0] > ms && sz[1] > 0.25*ms); }
     const sh=new Float32Array(nV*2);
@@ -478,7 +494,7 @@ function tagShapes(root){
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 let grassMesh;
 (function buildGrass(){
-  const rg = mulberry32(5), pos=[], nor=[];
+  const rg = mulberry32(5), pos=[], nor=[], root3=[];
   for(let c=0;c<110;c++){                               // (a few simple tufts: light on phones)
     const a = rg()*Math.PI*2, r = 2.5 + Math.sqrt(rg())*1.05;
     const cx=Math.sin(a)*r, cz=Math.cos(a)*r;
@@ -490,7 +506,7 @@ let grassMesh;
       const h=0.2+rg()*0.34, w=0.045+rg()*0.03, ang=rg()*Math.PI*2, lean=0.04+rg()*0.22;
       const ux=Math.cos(ang+Math.PI/2)*w/2, uz=Math.sin(ang+Math.PI/2)*w/2;
       const tx=bx+Math.cos(ang)*lean, tz=bz+Math.sin(ang)*lean;
-      pos.push(bx-ux,0.01,bz-uz, bx+ux,0.01,bz+uz, tx,h,tz);
+      pos.push(bx-ux,0.01,bz-uz, bx+ux,0.01,bz+uz, tx,h,tz); for(let v=0;v<3;v++) root3.push(bx,0.01,bz);
       const nx=Math.cos(ang)*0.35, nz=Math.sin(ang)*0.35, l=Math.hypot(nx,1,nz);
       for(let v=0;v<3;v++) nor.push(nx/l,1/l,nz/l);
     }
@@ -498,6 +514,7 @@ let grassMesh;
   const g=new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor,3));
+  g.setAttribute('aRoot', new THREE.Float32BufferAttribute(root3,3));
   const m=matFor('grass'); m.side=THREE.DoubleSide;
   grassMesh = new THREE.Mesh(g, m); grassMesh.userData.role='grass'; grassMesh.frustumCulled=false; group.add(grassMesh);
 })();
@@ -518,10 +535,12 @@ function setupShadow(cfg){
   SHARED.uL.value.copy(cfg.light);
   SHARED.uLightV.value.copy(lightCam.matrixWorldInverse);
   SHARED.uLightVP.value.multiplyMatrices(lightCam.projectionMatrix, lightCam.matrixWorldInverse);
-  const hideGrass = grassMesh.visible; grassMesh.visible=false;
+  // grass casts no shadow: ALL grass, also the grass added under a downloaded model (its blades' long shadows made the
+  // ground among them dark while the blades stayed lit → pale spikes in a dark wash)
+  const hidden = []; scene.traverse(o=>{ if(o.isMesh && o.userData.role==='grass' && o.visible){ o.visible=false; hidden.push(o); } });
   scene.overrideMaterial = shadowMat;
   renderer.setRenderTarget(rtShadow); renderer.setClearColor(new THREE.Color().setRGB(1,1,1), 1); renderer.render(scene, lightCam);
-  renderer.setRenderTarget(null); scene.overrideMaterial = null; grassMesh.visible = hideGrass;
+  renderer.setRenderTarget(null); scene.overrideMaterial = null; hidden.forEach(o=>{ o.visible = true; });
 }
 
 /* ------------------------------------------------------------------ */
@@ -849,10 +868,11 @@ float simAt(vec4 c, vec4 d, vec4 e, vec3 g0, float s0, float z0, vec4 e0, float 
 }
 // the brush goes out from the anchor and stops at the first border: another shape, a jump in depth, or a crease
 // may the brush go on to q? (not across another shape, a step in depth, or a crease)
+bool gNarrow = false;                                    // (a narrow form: its strokes go across its creases — a beam's faces are one stroke)
 bool okAt(vec2 q, float zp, vec3 np, float st, vec3 g0, float s0, vec4 e0, float tol, float mode, out float z, out vec3 nq){
   vec4 d = texture2D(tData,q), e = texture2D(tShape,q); z = d.b*uDepthRange; nq = octDec(e.xy);
   float inShape = sameShape(e, e0)*hasShape(e);
-  if(mode > -0.5 && (abs(z-zp) > 0.12 + 0.02*st || (inShape > 0.5 && dot(nq, np) < 0.80))) return false;
+  if(mode > -0.5 && (abs(z-zp) > 0.12 + 0.02*st || (inShape > 0.5 && dot(nq, np) < 0.80 && !gNarrow))) return false;
   return simAt(texture2D(tColor,q), d, e, g0, s0, z, e0, tol, mode) >= 0.5;
 }
 // the brush goes out from the anchor and stops at the first border; where it meets one, the border's place is narrowed
@@ -864,7 +884,7 @@ float traceOut(vec2 uv, vec2 dir, float st, int n, vec3 g0, float s0, float z0, 
     if(i>n) break;
     if(mode > -0.5){                                      // half way, too: a thin plane (a stair riser) must not be stepped over
       vec2 qm = uv + dir*(st*(float(i)-0.5))/uRes; vec4 dm = texture2D(tData,qm), em = texture2D(tShape,qm);
-      if((hasShape(em) > 0.5 && dot(octDec(em.xy), np) < 0.80) || (!passage && abs(dm.b*uDepthRange-zp) > 0.12 + 0.01*st)){ fail = st*(float(i)-0.5); break; }
+      if((hasShape(em) > 0.5 && dot(octDec(em.xy), np) < 0.80 && !(gNarrow && sameShape(em, e0) > 0.5)) || (!passage && abs(dm.b*uDepthRange-zp) > 0.12 + 0.01*st)){ fail = st*(float(i)-0.5); break; }
     }
     if(!okAt(uv + dir*(st*float(i))/uRes, zp, np, st, g0, s0, e0, tol, mode, z, nq)){ fail = st*float(i); break; }
     L = st*float(i); zp = z; np = nq;
@@ -1021,6 +1041,7 @@ void main(){
     float along = 0.0;
     for(int k=-2;k<=2;k++){ if(k==0) continue; vec2 q = uv + dA*(float(k)*sz*0.45)/uRes; along += texture2D(tData,q).a*sameShape(texture2D(tShape,q), e0); }
     bool narrowForm = !bigShape && along > 3.5 && length(dA) > 0.5 && layer > 0.5;
+    gNarrow = narrowForm;
     if(narrowForm && layer > 1.5) bigShape = true;        // its shadow is ONE graded stroke filling it: blended in itself
     // brushes of two sizes (Hertzmann): part of the colour and shadow strokes are a FINE brush, which paints only where
     // the coarse brush cannot follow the form — near a border, a crease or a step in depth
@@ -1040,10 +1061,10 @@ void main(){
     float mode = layer<0.5 ? -1.0 : (layer>1.5 && layer<2.5) ? ((castHere || !bigShape) ? 1.0 : 2.0) : (layer>2.5 && layer<3.5) ? 0.5 : 0.0;
     float reach = layer>2.5 ? max(sz*0.6, 4.5*uK) : sz*0.9;
     float h = reach/2.0;
-    float W = 0.0; vec2 Wp = vec2(0.0); vec3 Wpp = vec3(0.0); vec3 Wc = vec3(0.0); float Ws = 0.0; float Wn = 0.0; vec2 Wno = vec2(0.0); float Bz = 0.0, Bw = 0.0, Ul = 0.0, Uw = 0.0, Nl = 0.0; vec2 Gl = vec2(0.0); float Gw = 0.0, Ps = 0.0, Pw = 0.0;
+    float W = 0.0; vec2 Wp = vec2(0.0); vec3 Wpp = vec3(0.0); vec3 Wc = vec3(0.0); float Ws = 0.0; float Wn = 0.0; vec2 Wno = vec2(0.0); float Bz = 0.0, Bw = 0.0, Ul = 0.0, Uw = 0.0, Nl = 0.0; vec2 Gl = vec2(0.0); float Gw = 0.0, Ps = 0.0, Pw = 0.0, Tz = 0.0, Tw = 0.0;
     if(vis > 0.02){                                    // a coarse look around: the shape's colour, light and main axis
       for(int j=-2;j<=2;j++){
-        float prevS = -1.0;
+        float prevS = -1.0, prevR = 0.0;
         for(int i=-2;i<=2;i++){
           vec2 o = vec2(float(i),float(j))*h;
           vec2 q = uv + o/uRes;
@@ -1053,6 +1074,9 @@ void main(){
           Gl += wc*o*(c.a-s0); Gw += wc*dot(o,o); Ps += wc*c.a; Pw += wc;
           W += w; Wp += w*o; Wpp += w*vec3(o.x*o.x, o.x*o.y, o.y*o.y); Wc += c.rgb*w; Ws += c.a*w;
           if(prevS >= 0.0){ Bz += d.a*abs(c.a-prevS); Bw += d.a; }   // light flickering from sample to sample: blades, leaves
+          float lr = dot(texture2D(tRaw, q).rgb, vec3(0.2126,0.7152,0.0722));
+          if(prevS >= 0.0 && wc > 0.5){ Tz += abs(lr - prevR); Tw += 1.0; }   // the object's own TEXTURE varying (thatch, wood, brick)
+          prevR = lr;
           prevS = c.a; Ul += d.a*dot(c.rgb, vec3(0.2126,0.7152,0.0722)); Uw += d.a;
           float nearer = d.a*step(d.b*uDepthRange, z0-0.25);   // nearer surfaces around me: I am in a crevice / behind an edge
           Wn += nearer; Wno += nearer*o; Nl += nearer*dot(c.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*c.a);
@@ -1070,7 +1094,10 @@ void main(){
     float aniso = smoothstep(1.5,4.0,(l1+0.5)/(l2+0.5));
     float trust = smoothstep(1.0,4.0,W);
     float smoothF = smoothstep(0.55, 0.95, W/25.0);     // one calm, even shape all round: a bigger, wetter brush
-    float busy = smoothstep(0.14, 0.28, Bz/max(Bw,1.0));   // (a painted pattern or a single shadow edge is not 'busy')
+    float busy = smoothstep(0.14, 0.28, Bz/max(Bw,1.0));
+    // a textured surface in the light (thatch, planks, brick) gets a few dry-brush strokes of a slightly darker tone of
+    // its own colour, along the face: its lit side is not one flat wash
+    float texBusy = layer > 3.5 && layer < 4.5 ? smoothstep(0.035, 0.10, Tz/max(Tw,1.0))*hasShape(e0)*step(4.0, Tw) : 0.0;   // (a painted pattern or a single shadow edge is not 'busy')
     sz *= mix(1.0, mix(1.6, 1.15, uDetail), smoothF*isMid);
     float hlDef = sz*vInfo.w*0.5, hwDef = sz*0.5;
 
@@ -1173,7 +1200,8 @@ void main(){
         float face = texture2D(tData, uv).r;              // in shadow a plane facing the sky stays a little lighter
         amount = smoothstep(0.08, 0.20, modelV(s, cast0))*modelVR(s, cast0, texture2D(tLine, uv).b)*mix(1.25, 0.75, smoothstep(0.5, 0.95, face))*uShadeK;
       }
-      col = uShadow*2.0 + Ab*(0.60 + 0.9*(uShadeK - 1.0));   // (more contrast: the shadow also deepens the material's own colour)
+      vec3 AbS = Ab*min(1.0, 0.75/max(dot(Ab, vec3(0.3333)), 1e-3));   // (a dark material — dark wood, slate — is already dark in its local colour: its shadow adds a value step, it does not go black)
+      col = uShadow*2.0 + AbS*(0.60 + 0.9*(uShadeK - 1.0));   // (more contrast: the shadow also deepens the material's own colour)
     } else if(layer<3.5){                                 // cream / butter: small strong darks where the eye needs them
       float D = pocket ? smoothstep(0.15, 0.4, crev)*1.3*aniso : 0.0;   // a recess long enough to read as one (no spots)                            // (no thin lines in the light: they read as pencil; shape borders do that job)
       // a local dark: something much darker than what is around it (an eye, a window, a doorway) gets its dark, small and strong
@@ -1190,6 +1218,8 @@ void main(){
     } else if(layer<4.5){                                 // dry-brush flecks where the picture is busy (grass, leaves, rough stuff)
       amount = 0.75*step(0.45, rr.y)*busy*mix(1.0,0.4,uDetail);
       col = Ab*1.15 + uShadow*0.5;
+      if(texBusy > busy){ amount = 0.55*step(0.35, rr.y)*texBusy*mix(1.0,0.5,uDetail)*smoothstep(0.25, 0.6, sP); col = Ab*1.35 + uShadow*0.25 + vec3(0.06);   // (a tone of its own colour)
+        hl = max(hl, hlDef*1.4); hw = min(hw, max(1.2*uK, 0.35*hw)); }
     }
     if(uFadeR > 0.0){                                     // the ground under the model fades out into the paper (a vignette)
       float r = length(vPos.xz - uFadeC)/uFadeR;
@@ -1311,7 +1341,8 @@ void main(){
       vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
       vec2 qq = (gl_FragCoord.xy + o*1.6)/uRes;
       vec4 dq = texture2D(tDataS, qq);
-      sh += 0.25*dq.a*max(1.0 - smoothstep(0.10, 0.30, texture2D(tLitS, qq).a), dq.g);
+      float sliverQ = (1.0 - step(0.25, texture2D(tShapeS, qq).z))*step(0.5, dq.a);   // (a grass blade is painted with what is around it: never a hole in the shadow)
+      sh += 0.25*dq.a*max(max(1.0 - smoothstep(0.10, 0.30, texture2D(tLitS, qq).a), dq.g), sliverQ);
     }
     a *= mix(sh, 1.0, clamp(vTr.x, 0.0, 1.0));
   } else
@@ -1320,7 +1351,8 @@ void main(){
     for(int k=0;k<4;k++){
       vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
       vec4 e = texture2D(tShapeS, (gl_FragCoord.xy + o*1.6)/uRes);
-      mine += 0.25*step(0.25, e.z)*(1.0 - step(7e-4, abs(e.z - vShp.x) + abs(e.w - vShp.y)));
+      float sliverM = (1.0 - step(0.25, e.z))*step(0.5, texture2D(tDataS, (gl_FragCoord.xy + o*1.6)/uRes).a);   // a grass blade ON the model (not the sky)
+      mine += 0.25*max(step(0.25, e.z)*(1.0 - step(7e-4, abs(e.z - vShp.x) + abs(e.w - vShp.y))), sliverM);   // (blades are not a border: no holes)
     }
     a *= mix(mine, 1.0, clamp(vTr.x, 0.0, 1.0));
   }
@@ -1565,7 +1597,7 @@ const AO_FS = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShapeA; uniform vec2 uResI; uniform float uKi, uDR, uFocal;
-float zAt(vec2 q){ vec4 d = texture2D(tData, q); return d.a > 0.5 ? d.b*uDR : -1.0; }
+float zAt(vec2 q){ vec4 d = texture2D(tData, q); return (d.a > 0.5 && texture2D(tShapeA, q).z >= 0.25) ? d.b*uDR : -1.0; }   // (not on grass blades: the ground's slope was read off the blades)
 void main(){
   vec4 c = texture2D(tColor, vUv), d = texture2D(tData, vUv);
   if(d.a < 0.5){ gl_FragColor = c; return; }
@@ -1584,7 +1616,8 @@ void main(){
     vec4 dq = texture2D(tData, vUv + o*px);
     float plane = z0 + gx*o.x + gy*o.y;                    // where my own surface would be there, if it went on flat
     float dz = plane - dq.b*uDR;                           // > 0: the neighbour rises above my tangent plane (it hangs over me)
-    occ += dq.a*smoothstep(0.03, 0.15, dz)*(1.0 - smoothstep(0.6, 1.2, dz));
+    float solid = step(0.25, texture2D(tShapeA, vUv + o*px).z);   // (grass blades shade nothing: they made the ground among them a 'crevice' → pale spikes in a dark wash)
+    occ += solid*dq.a*smoothstep(0.03, 0.15, dz)*(1.0 - smoothstep(0.6, 1.2, dz));
   }
   float ao = 1.0 - occ/12.0;                              // 1: open, flat or convex (never darkened); 0: deep in a crevice
   // a steady picture to paint from: the colour is softened WITHIN each shape (same piece, same depth), so a texture's
@@ -1969,7 +2002,7 @@ function addGround(root, geo){
   const R = Math.max(2.1*foot, 0.30*Math.max(bb.max.x-bb.min.x, bb.max.z-bb.min.z));
   const disc = new THREE.Mesh(new THREE.CylinderGeometry(R, R*1.02, 0.02*h, 72), matFor('ground'));
   disc.position.set(cx, y0 - 0.01*h, cz); disc.userData.role = 'ground'; root.add(disc);
-  const rg = mulberry32(11), P = [], N = [], s = R/3.7;   // (blades sized like the pavilion's, scaled to this ground)
+  const rg = mulberry32(11), P = [], N = [], R3 = [], s = R/3.7;   // (blades sized like the pavilion's, scaled to this ground)
   for(let c=0;c<110;c++){
     const a = rg()*Math.PI*2, r = foot*1.05 + Math.sqrt(rg())*(R*0.97 - foot*1.05);
     const bx0 = cx+Math.sin(a)*r, bz0 = cz+Math.cos(a)*r, n = 3+Math.floor(rg()*3);
@@ -1978,13 +2011,13 @@ function addGround(root, geo){
       if(Math.hypot(bx-cx, bz-cz) < foot || Math.hypot(bx-cx, bz-cz) > R*0.98) continue;
       const bh = (0.14+rg()*0.24)*s, w = (0.045+rg()*0.03)*s, ang = rg()*Math.PI*2, lean = (0.04+rg()*0.22)*s;
       const ux = Math.cos(ang+Math.PI/2)*w/2, uz = Math.sin(ang+Math.PI/2)*w/2, tx = bx+Math.cos(ang)*lean, tz = bz+Math.sin(ang)*lean;
-      P.push(bx-ux,y0,bz-uz, bx+ux,y0,bz+uz, tx,y0+bh,tz);
+      P.push(bx-ux,y0,bz-uz, bx+ux,y0,bz+uz, tx,y0+bh,tz); for(let v=0;v<3;v++) R3.push(bx,y0,bz);
       const nx = Math.cos(ang)*0.35, nz = Math.sin(ang)*0.35, l = Math.hypot(nx,1,nz);
       for(let v=0;v<3;v++) N.push(nx/l,1/l,nz/l);
     }
   }
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(P,3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N,3));
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P,3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N,3)); g.setAttribute('aRoot', new THREE.Float32BufferAttribute(R3,3));
   const m = matFor('grass'); m.side = THREE.DoubleSide;
   const grass = new THREE.Mesh(g, m); grass.userData.role = 'grass'; grass.frustumCulled = false; root.add(grass);
 }
