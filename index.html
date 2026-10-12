@@ -121,6 +121,8 @@ body.menu-open .toast{opacity:0}
 .picker{left:calc(24px + env(safe-area-inset-left,0px));transform-origin:0 100%}
 .settings{right:calc(24px + env(safe-area-inset-right,0px));transform-origin:100% 100%}
 @keyframes panelIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+.panel.closing{animation:panelOut .2s ease forwards;pointer-events:none}   /* (a menu fades away the way it came) */
+@keyframes panelOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(8px) scale(.98)}}
 .panel h2{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft)}
 .picker h2{margin:0}
 .choices{list-style:none;margin:0;padding:0;display:grid;gap:4px}
@@ -156,7 +158,7 @@ body.menu-open .toast{opacity:0}
 .peek:active,.peek.on{background:var(--chip-on);color:var(--chip-on-ink)}
 .about{margin:0;font-size:14px;font-style:italic;line-height:1.4;color:var(--ink-soft);text-align:center}
 .pick-btn:focus-visible,.choices button:focus-visible,.mood:focus-visible,.peek:focus-visible,canvas:focus-visible{outline:2px solid #4a5da8;outline-offset:2px}
-@media (prefers-reduced-motion:reduce){.hint .hint-hand{animation:none}.hint,.toast{transition:none}.panel{animation:none}}
+@media (prefers-reduced-motion:reduce){.hint .hint-hand{animation:none}.hint,.toast{transition:none}.panel,.panel.closing{animation:none}}
 </style>
 
 </head>
@@ -589,7 +591,8 @@ function splitLines(o, set){
   const g = o.geometry; if(o.userData.role === 'line') return;
   if(!g.userData.lineGeo){
     const idx = g.index, n = idx ? idx.count/3 : g.attributes.position.count/3, keep = [], lines = [];
-    for(let t=0;t<n;t++){ const a=idx?idx.getX(t*3):t*3, b=idx?idx.getX(t*3+1):t*3+1, c=idx?idx.getX(t*3+2):t*3+2; (set.has(t) ? lines : keep).push(a,b,c); }
+    for(let t=0;t<n;t++){ const a=idx?idx.getX(t*3):t*3, b=idx?idx.getX(t*3+1):t*3+1, c=idx?idx.getX(t*3+2):t*3+2; const k = set.get(t);
+      if(k) lines.push(a,b,c); if(k !== 1) keep.push(a,b,c); }   // (1: out of the reference, a line on top; 2: a board: both)
     const gl = new THREE.BufferGeometry(); for(const k in g.attributes) gl.setAttribute(k, g.attributes[k]); gl.setIndex(lines);
     g.setIndex(keep); g.userData.lineGeo = gl;
   }
@@ -627,8 +630,8 @@ function buildStrokes(root, countScale, skyN){
   const nT = TAR.length;
   const thin = findThinThings(TA, TAR, nT);
   const planeAxis = planeAxes(TA, TN, TAR, TSH, nT);
-  for(let i=0;i<nT;i++) if(thin.isLine[i]) TRO[i] = 'line';      // (not sown with surface strokes)
-  { const per = new Map(); for(let i=0;i<nT;i++) if(thin.isLine[i]){ if(!per.has(TM[i])) per.set(TM[i], new Set()); per.get(TM[i]).add(TT[i]); }
+  for(let i=0;i<nT;i++) if(thin.isLine[i] === 1) TRO[i] = 'line';      // (not sown with surface strokes; boards (2) are)
+  { const per = new Map(); for(let i=0;i<nT;i++) if(thin.isLine[i]){ if(!per.has(TM[i])) per.set(TM[i], new Map()); per.get(TM[i]).set(TT[i], thin.isLine[i]); }
     for(const [o, set] of per) splitLines(o, set); }
   const rg = mulberry32(2024);
   const nSeg = thin.chains.reduce((a,c)=>a+c.knots.length-1, 0);
@@ -795,14 +798,18 @@ function findThinThings(TA, TAR, nT){
     const r = Math.sqrt(Math.max(e/ne,0));
     if(r > maxR || L < 12*r) continue;
     for(const t of tris) isLine[t]=1;
-    chains.push({ knots, r: Math.max(r, 1e-4), tris, m, ax, t0, L });
+    const tr2 = c11+c22, dt2 = c11*c22-c12*c12, q2 = Math.sqrt(Math.max(tr2*tr2/4-dt2,0));
+    const flat = (tr2/2+q2)/Math.max(tr2/2-q2, 1e-12);       // (cross-section: a plank is flat, a bar or rod is square or round)
+    chains.push({ knots, r: Math.max(r, 1e-4), tris, m, ax, t0, L, flat });
   }
-  // BOARDS SIDE BY SIDE ARE A SURFACE (a slatted roof, a plank floor), not a lattice: a thin piece with a parallel
+  // BOARDS SIDE BY SIDE ARE A SURFACE (a slatted roof, a plank floor), not a lattice: a flat thin piece with a parallel
   // neighbour closer than ~7 of its radii (touching boards are ~3.5 apart, lattice bars 10+) stays a surface — in the
-  // reference, painted by the surface strokes (taken out, the wall BEHIND the roof was painted through it)
+  // reference, painted by the surface strokes (taken out, the wall BEHIND the roof was painted through it) — and still
+  // gets its lines (isLine 2), drawn only where a board stands out from what is beside it (an edge-on sail against the sky)
   const keep = chains.map(()=>true);
   for(let i=0;i<chains.length;i++) for(let j=i+1;j<chains.length;j++){
     const A = chains[i], B = chains[j];
+    if(A.flat < 6 || B.flat < 6) continue;                     // (only PLANKS make a surface; lattice bars stay lines)
     const dp = Math.abs(A.ax[0]*B.ax[0] + A.ax[1]*B.ax[1] + A.ax[2]*B.ax[2]); if(dp < 0.94) continue;
     const d = [0,1,2].map(c=>B.m[c]-A.m[c]); const al = d[0]*A.ax[0]+d[1]*A.ax[1]+d[2]*A.ax[2];
     if(Math.abs(al) > 0.5*Math.max(A.L, B.L)) continue;          // (side by side, not end to end)
@@ -810,7 +817,7 @@ function findThinThings(TA, TAR, nT){
     if(perp < 3.5*(A.r + B.r)){ keep[i] = false; keep[j] = false; }
   }
   const out = [];
-  chains.forEach((c,i)=>{ if(keep[i]) out.push({ knots:c.knots, r:c.r }); else for(const t of c.tris) isLine[t] = 0; });
+  chains.forEach((c,i)=>{ out.push({ knots:c.knots, r:c.r }); if(!keep[i]) for(const t of c.tris) isLine[t] = 2; });
   return { isLine, chains: out };
 }
 // a brush mark is a strip along its (slightly curved) path: STRIP_N columns, two rows
@@ -1023,7 +1030,10 @@ void main(){
       if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < max(tolZ, 2.2*vInfo.z + 0.008)){   // (a wide piece's surface is far from its centre line: the chimney)
         vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0;   // its material colour, darkened only by real shade (a white bar in half light stays white)
         float lOwn = dot(cc.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cc.a);
-        vec4 bC = texture2D(tColor, q); float lBg = d.a > 0.5 ? dot(bC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*bC.a) : 0.85;
+        // against what is BESIDE it (a board kept in the reference would otherwise be compared with itself)
+        vec2 qo = nW*(1.2*vInfo.z*uFocal/max(c.w, 0.05) + 2.0*uK)/uRes; float lBg = 0.0;
+        for(int sd=-1; sd<=1; sd+=2){ vec2 qb = q + float(sd)*qo; vec4 bD = texture2D(tData, qb), bC = texture2D(tColor, qb);
+          lBg += 0.5*(bD.a > 0.5 ? dot(bC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*bC.a) : 0.85); }
         cDiff += lOwn - lBg;                               // how it differs from what is behind it (the surfaces are painted without it)
         if(i % 2 == 0){
           float hwE = 0.7*vInfo.z*uFocal/max(c.w, 0.05);
@@ -2336,16 +2346,33 @@ function step(d){ const i = PAINTINGS.findIndex(p=>p.id===current); goTo(PAINTIN
 document.addEventListener('keydown', e=>{ if(e.key==='[' || e.key==='PageUp'){ step(-1); } else if(e.key===']' || e.key==='PageDown'){ step(1); } });
 // two panels, one open at a time: the painting chooser (bottom left) and the settings (bottom right)
 const menuBtn = $('menuBtn'), dock = $('dock');
+const closeTimers = new Map();
+function showPanel(el, on){                               // open at once; close by fading out (then hidden)
+  clearTimeout(closeTimers.get(el));
+  if(on){ el.classList.remove('closing'); el.hidden = false; return; }
+  if(el.hidden) return;
+  if(reduceMotion){ el.hidden = true; return; }
+  el.classList.add('closing');
+  closeTimers.set(el, setTimeout(()=>{ el.hidden = true; el.classList.remove('closing'); }, 200));
+}
 function openPanel(which){
   const pick = which==='picker', set = which==='settings';
-  picker.hidden = !pick; dock.hidden = !set;
+  showPanel(picker, pick); showPanel(dock, set);
   pickBtn.setAttribute('aria-expanded', pick); menuBtn.setAttribute('aria-expanded', set);
   menuBtn.setAttribute('aria-label', set ? 'Close the palette' : 'Palette and options');
   document.body.classList.toggle('menu-open', pick || set);
 }
-pickBtn.addEventListener('click', ()=>openPanel(picker.hidden ? 'picker' : null));
-menuBtn.addEventListener('click', ()=>openPanel(dock.hidden ? 'settings' : null));
-document.addEventListener('keydown', e=>{ if(e.key==='Escape' && (!picker.hidden || !dock.hidden)){ const f = !picker.hidden ? pickBtn : menuBtn; openPanel(null); f.focus(); } });
+const isOpen = el => !el.hidden && !el.classList.contains('closing');
+pickBtn.addEventListener('click', ()=>openPanel(isOpen(picker) ? null : 'picker'));
+menuBtn.addEventListener('click', ()=>openPanel(isOpen(dock) ? null : 'settings'));
+// with a mouse, a menu opens when the pointer rests on its button and closes a moment after it leaves the button and
+// the menu (touch screens have no hover: there a tap opens it, as before)
+{ let hoverT = 0;
+  const canHover = matchMedia('(hover: hover) and (pointer: fine)');
+  const enter = which => e => { if(e.pointerType !== 'mouse' || !canHover.matches) return; clearTimeout(hoverT); openPanel(which); };
+  const leave = e => { if(e.pointerType !== 'mouse' || !canHover.matches) return; clearTimeout(hoverT); hoverT = setTimeout(()=>openPanel(null), 350); };
+  [[pickBtn,'picker'],[picker,'picker'],[menuBtn,'settings'],[dock,'settings']].forEach(([el,w])=>{ el.addEventListener('pointerenter', enter(w)); el.addEventListener('pointerleave', leave); }); }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && (isOpen(picker) || isOpen(dock))){ const f = isOpen(picker) ? pickBtn : menuBtn; openPanel(null); f.focus(); } });
 canvas.addEventListener('pointerdown', ()=>openPanel(null));
 let loose = 0.40;                                        // (how loose the brushwork is: fixed now; the pencil is hidden for now)
 let showRaw=0, showRawTarget=0;
