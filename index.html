@@ -1416,7 +1416,7 @@ void main(){
       // a thin thing like what is behind it (a plank on its roof) needs no line: that colour is painted already. A lighter
       // one (a white frame on a blue wall) is RESERVED in the strokes behind it (STROKE_FS/WET_FS) and gets its own
       // light colour here; a darker one (lattice, cable) is painted on top
-      if(lw > 0.5) amount *= smoothstep(0.05, 0.13, abs(cDiff/lw));
+      if(lw > 0.5 && vInfo.w > 1.5) amount *= smoothstep(0.05, 0.13, abs(cDiff/lw));   // (only a BOARD in a surface needs to stand out; a true thin thing is always drawn, user)
       // (its centre line is a chord between knots: on a CURVED piece — a dome's rib — it can run inside the curve, where
       // the depth test finds no colour; then its colour wherever its own picture shows it; only a cable too thin to
       // show at all is a dark line)
@@ -1445,7 +1445,7 @@ void main(){
         // glazed over it in its full own colour — a painter's way; what cannot be glazed was reserved above)
         if(vInfo.w < 1.5) Am = At;
         col = Am/0.9;
-        amount = 0.9*smoothstep(0.04, 0.12, dot(Am, vec3(0.3333)))*smoothstep(0.05, 0.13, abs(cDiff/lw))*uCables;
+        amount = vInfo.w > 1.5 ? 0.9*smoothstep(0.04, 0.12, dot(Am, vec3(0.3333)))*smoothstep(0.05, 0.13, abs(cDiff/lw))*uCables : 0.9*uCables;   // (a true thin thing: always its stroke, in its own colour, wherever it is seen)
         // (a BOARD among boards — a plank roof — is drawn only where it clearly stands out: a slightly darker plank among
         // its neighbours gave rows of dark dashes, user: "odd dark red lines" on the Moomin porch roof)
         if(vInfo.w > 1.5) amount *= smoothstep(uBoardT, uBoardT + 0.10, abs(cDiff/lw));
@@ -1461,9 +1461,6 @@ void main(){
           // so it fills it — drawn at its own width it left white slivers beside it and went dark where it missed: the ladder)
           hw = hw*1.6 + 1.5*uK; ramp = vec4(1.0, 1.0, 0.0, 2.0); }
         if(uFadeR > 0.0 && vPos.y <= uFadeY) amount *= 1.0 - smoothstep(0.70, 1.0, length(vPos.xz - uFadeC)/uFadeR);
-        // (a model whose thin things are ALWAYS drawn — whiskers, user: "clear thin objects, always a stroke"): where the
-        // line is no darker than what is behind it (white on white fur) it is drawn as a soft grey of its own colour
-        if(uLineAll > 0.5 && amount < 0.5){ vec3 o3 = lw > 0.5 ? lcm/lw : own; col = harmonise(-log(clamp(o3*0.72, 0.03, 1.0)))/0.9 + uShadow*0.25; amount = 0.8*uCables; }
       }  // a rod, a rib, a pole: its OWN colour; its light and shade come from the profile
     }
   } else {
@@ -3501,7 +3498,7 @@ const MODELS = {
   moomin:  { root:()=>moominGroup, yaw:0.70, pitch:0.38, fit:0.88, shadeK:1.3, load:()=>loadPack('moomin', 'moomin_house', moominGroup, { ground:true, lift:1.4, planks:{ col:[50,80,120], tol:0.30, w:0.30, paint:[58,92,138] } }) },
   bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup, { plate:{ col:[230,169,118], base:[97,63,41], r:5.6 } }) },
   cats:    { root:()=>catsGroup, fade:{ c:new THREE.Vector2(0,0), r:9.5, y:-2.0 },   // (the meadow fades into the paper at its edge)
-            yaw:0.10, pitch:0.26, fit:0.36, shadeK:1.0, marks:1.0, colK:0.6, coarseMin:0, coarseK:0, shadowOwn:0.75, lineAll:1,   // (soft round animals: painted wet, shade in their own colour)   // (its fur patches are its pattern: kept, not averaged away)
+            yaw:0.10, pitch:0.26, fit:0.36, shadeK:1.0, marks:1.0, colK:0.6, coarseMin:0, coarseK:0, shadowOwn:0.75,   // (soft round animals: painted wet, shade in their own colour)   // (its fur patches are its pattern: kept, not averaged away)
             load:()=>loadPack('cats', 'cats', catsGroup, { skyK:1.6, features:{ whisker:1.8, maxLen:1.5, eyeMax:0.25 }, ground:{ y:-2.19, c:[0,0], r:11, col:[150,172,108], grass:0.9 }, groundBushes:{ n:46, s:0.55, col:[88,122,62], on:[150,172,108], avoid:{ c:[0,0], r:5.2 }, within:{ c:[0,0], r:7.6 } } }) },
   medieval:{ root:()=>medievalGroup, target:new THREE.Vector3(-0.25,1.30,-0.20), halfW:2.3, halfH:2.0, yaw:0.35, pitch:0.90, shadeK:1.4, strokeK:0.55, shadowHalf:4.2, shadowCenter:new THREE.Vector3(-0.25,0.4,-0.25),   // (the shadow map on the hill and castle, not the painted ground round it: 2x finer, no blocky shade)
                // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
