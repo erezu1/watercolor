@@ -824,6 +824,7 @@ function buildStrokes(root, countScale, skyN){
   { const per = new Map(); for(let i=0;i<nT;i++) if(thin.isLine[i]){ if(!per.has(TM[i])) per.set(TM[i], new Map()); per.get(TM[i]).set(TT[i], thin.isLine[i]); }
     for(const [o, set] of per) splitLines(o, set); }
   const rg = mulberry32(2024);
+  const layAcc = LAYERS.map(()=>0), layLn = LAYERS.map(()=>0);
   // (a model standing in its own sea: rock below the water line is sown like the rest (the same random sequence, so
   // nothing else moves), but those strokes are sunk far out of sight — at a low view they were nearly as near as the
   // water above them and showed through it as dark marks)
@@ -839,7 +840,7 @@ function buildStrokes(root, countScale, skyN){
     // terraces and painted ground took most of the strokes by area and left the castle with a coarse few)
     for(let i=0;i<nT;i++){ acc += (aP === 1 ? TAR[i] : Math.pow(TAR[i], aP))*(L.w[TRO[i]]||0); cdf[i]=acc; }
     if(acc<=0) return;
-    const Ln = Math.round(L.n*countScale);
+    const Ln = Math.round(L.n*countScale); layAcc[li] = acc; layLn[li] = Ln;
     for(let s=0;s<Ln;s++){
       const r=rg()*acc; let lo=0, hi=nT-1;
       while(lo<hi){ const mid=(lo+hi)>>1; if(cdf[mid]<r) lo=mid+1; else hi=mid; }
@@ -916,11 +917,17 @@ function buildStrokes(root, countScale, skyN){
   pgeo.setAttribute('aIdx', new THREE.BufferAttribute(aIdx,1));
   pgeo.setAttribute('aRank', new THREE.BufferAttribute(rank,1));
   pgeo.setDrawRange(0,k);
+  // the DETAIL POOL: slots after the model's own strokes (from a fresh row), each for one layer, empty until sown
+  const R0 = Math.ceil(k/STATE_S), K0 = R0*STATE_S, PN = Math.max(0, Math.min(POOL_MAX, STATE_S*STATE_S - K0));
+  const LNt = LAYERS.reduce((a,l)=>a+l.n, 0), poolLi = new Int8Array(PN);
+  { let j = 0; LAYERS.forEach((L,li)=>{ const m = li === LAYERS.length-1 ? PN - j : Math.round(PN*L.n/LNt); for(let q=0; q<m && j<PN; q++) poolLi[j++] = li; }); }
+  const poolGeo = new Int8Array(PN), poolInst = new Int32Array(PN);
   // drawing: one instanced brush-mark strip per glaze (each glaze is painted into its own wash buffer)
   const geos = [0,1,2,3].map(g=>{
     const ids=[]; for(let i=0;i<k;i++) if(glz[i]===g) ids.push(i);
+    for(let j=0;j<PN;j++) if(LAYERS[poolLi[j]].glaze === g){ poolGeo[j] = g; poolInst[j] = ids.length; ids.push(K0 + j); }
     const r4=new Float32Array(ids.length*4), i4=new Float32Array(ids.length*4), ix=new Float32Array(ids.length);
-    ids.forEach((id,j)=>{ r4.set(aRnd.subarray(id*4,id*4+4),j*4); i4.set(aInfo.subarray(id*4,id*4+4),j*4); ix[j]=id; });
+    ids.forEach((id,j)=>{ if(id < k){ r4.set(aRnd.subarray(id*4,id*4+4),j*4); i4.set(aInfo.subarray(id*4,id*4+4),j*4); } else i4.set([poolLi[id-K0], 0, 1, 1], j*4); ix[j]=id; });
     const geo = new THREE.InstancedBufferGeometry();
     geo.setAttribute('position', STRIP_POS); geo.setIndex(STRIP_IDX);
     geo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(r4,4));
@@ -929,16 +936,63 @@ function buildStrokes(root, countScale, skyN){
     geo.instanceCount = ids.length; geo.userData.total = ids.length;
     return geo;
   });
-  if(k > STATE_S*STATE_S) console.warn('too many strokes', k);
+  if(K0 + PN > STATE_S*STATE_S || k > STATE_S*STATE_S) console.warn('too many strokes', k, PN);
   // (the memory's per-stroke randomness was the stroke's texel: it follows the stroke's old place, so the order is invisible)
-  const rk = new Float32Array(STATE_S*STATE_S); for(let i=0;i<rk.length;i++) rk[i] = i < k ? rank[i] : i;
+  const rk = new Float32Array(STATE_S*STATE_S); for(let i=0;i<rk.length;i++) rk[i] = i < k ? rank[i] : (i >= K0 && i < K0+PN) ? -1 - (i - K0) : i;   // (pool: below every rank cut)
   const rankTex = new THREE.DataTexture(rk, STATE_S, STATE_S, THREE.RedFormat, THREE.FloatType); rankTex.minFilter = rankTex.magFilter = THREE.NearestFilter; rankTex.needsUpdate = true;
   // (prototype) the planner's per-stroke inputs as textures, so it can run as one full-screen pass instead of 1-px points
   const NT = STATE_S*STATE_S, tA = [0,1,2,3,4].map(()=>new Float32Array(NT*4));
   for(let i=0;i<k;i++){ tA[0].set([aPos[i*3],aPos[i*3+1],aPos[i*3+2],aDen[i]], i*4); tA[1].set([aNor[i*3],aNor[i*3+1],aNor[i*3+2],rank[i]], i*4);
     tA[2].set([aTan[i*3],aTan[i*3+1],aTan[i*3+2],0], i*4); tA[3].set(aRnd.subarray(i*4,i*4+4), i*4); tA[4].set(aInfo.subarray(i*4,i*4+4), i*4); }
+  for(let j=0;j<PN;j++){ const i = K0 + j; tA[0].set([0,-1000,0,0], i*4); tA[1].set([0,1,0,-1-j], i*4); tA[2].set([1,0,0,0], i*4); tA[4].set([poolLi[j],0,1,1], i*4); }   // (empty: far below, never seen)
   const attrTex = tA.map(a=>{ const t = new THREE.DataTexture(a, STATE_S, STATE_S, THREE.RGBAFormat, THREE.FloatType); t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; return t; });
-  return { geos, pgeo, total:k, rankTex, attrTex };
+  // SOW THE POOL for this view: on the triangles in the picture and facing it, with each layer's own weights, r times
+  // the model's own density there (r 0: empty it). Returns how much of that it could sow (the pool is finite).
+  const PR = Math.ceil(PN/STATE_S), poolTex = PN ? tA.map(a=>{ const t = new THREE.DataTexture(a.subarray(K0*4, (K0 + PR*STATE_S)*4), STATE_S, PR, THREE.RGBAFormat, THREE.FloatType); t.minFilter = t.magFilter = THREE.NearestFilter; return t; }) : null;
+  const vis = new Uint8Array(nT), up2 = new THREE.Vector3(0,1,0), nrm2 = new THREE.Vector3(), tan2 = new THREE.Vector3(), tmp2 = new THREE.Vector3(), con2 = new THREE.Vector3();
+  function sowDetail(VP, cam, r){
+    if(!PN) return 0;
+    const e = VP.elements;
+    for(let i=0;i<nT;i++){ const b = i*9, cx = (TA[b]+TA[b+3]+TA[b+6])/3, cy = (TA[b+1]+TA[b+4]+TA[b+7])/3, cz = (TA[b+2]+TA[b+5]+TA[b+8])/3;
+      const w = e[3]*cx + e[7]*cy + e[11]*cz + e[15]; if(r <= 0 || w <= 0.05 || TRO[i] === 'line'){ vis[i] = 0; continue; }
+      const x = (e[0]*cx + e[4]*cy + e[8]*cz + e[12])/w, y = (e[1]*cx + e[5]*cy + e[9]*cz + e[13])/w;
+      const f = (TN[b]+TN[b+3]+TN[b+6])*(cam.x-cx) + (TN[b+1]+TN[b+4]+TN[b+7])*(cam.y-cy) + (TN[b+2]+TN[b+5]+TN[b+8])*(cam.z-cz);
+      vis[i] = (Math.abs(x) < 1.08 && Math.abs(y) < 1.08 && f > 0) ? 1 : 0; }
+    const rp = mulberry32(4711), aP = root.userData.areaPow || 1; let want = 0, got = 0;
+    const slots = LAYERS.map(()=>[]); for(let j=0;j<PN;j++) slots[poolLi[j]].push(j);
+    LAYERS.forEach((L,li)=>{
+      const cdf = new Float64Array(nT); let acc = 0;
+      for(let i=0;i<nT;i++){ acc += vis[i] ? (aP === 1 ? TAR[i] : Math.pow(TAR[i], aP))*(L.w[TRO[i]]||0) : 0; cdf[i] = acc; }
+      const need = layAcc[li] > 0 ? r*layLn[li]*acc/layAcc[li] : 0, sl = slots[li], n = Math.min(sl.length, Math.round(need));
+      want += need; got += n;
+      for(let q=0;q<sl.length;q++){
+        const j = sl[q], i = K0 + j, g = geos[poolGeo[j]], ii = poolInst[j];
+        if(q >= n || acc <= 0){ tA[0].set([0,-1000,0,0], i*4); continue; }
+        const rr0 = rp()*acc; let lo = 0, hi = nT-1; while(lo<hi){ const mid=(lo+hi)>>1; if(cdf[mid]<rr0) lo=mid+1; else hi=mid; }
+        const b9 = lo*9; let u = rp(), v = rp(); if(u+v>1){ u=1-u; v=1-v; } const w = 1-u-v;
+        const px = TA[b9]*w+TA[b9+3]*u+TA[b9+6]*v, py = TA[b9+1]*w+TA[b9+4]*u+TA[b9+7]*v, pz = TA[b9+2]*w+TA[b9+5]*u+TA[b9+8]*v;
+        nrm2.set(TN[b9]*w+TN[b9+3]*u+TN[b9+6]*v, TN[b9+1]*w+TN[b9+4]*u+TN[b9+7]*v, TN[b9+2]*w+TN[b9+5]*u+TN[b9+8]*v).normalize();
+        const role = TRO[lo], rr = rp();
+        tmp2.copy(up2).addScaledVector(nrm2, -up2.dot(nrm2)); con2.crossVectors(nrm2, up2);
+        if(Math.abs(nrm2.y) > 0.8){ const a = rp()*6.283; tan2.set(Math.cos(a),0,Math.sin(a)); }
+        else tan2.copy(root.userData.around ? con2 : (rr<0.6 ? tmp2 : con2));
+        { const pa = planeAxis[lo]; if(pa && role !== 'line'){ tan2.set(pa[0],pa[1],pa[2]); tan2.addScaledVector(nrm2, -tan2.dot(nrm2)); } }
+        if(tan2.lengthSq() < 1e-6) tan2.set(1,0,0); tan2.normalize();
+        const rnd = [rp(),rp(),rp(),rp()], info = [li, TW[lo] ? 11 : KIND_ID[role], 0.85+0.3*rp(), L.asp*(0.8+0.5*rp())*(TW[lo] ? 2.4 : 1.0)];
+        tA[0].set([px, (seaY !== null && !TW[lo] && py < seaY) ? py - 1000 : py, pz, layLn[li]*(L.w[role]||0)/layAcc[li]], i*4);
+        tA[1].set([nrm2.x, nrm2.y, nrm2.z, -1-j], i*4); tA[2].set([tan2.x, tan2.y, tan2.z, 0], i*4); tA[3].set(rnd, i*4); tA[4].set(info, i*4);
+        g.attributes.aRnd.array.set(rnd, ii*4); g.attributes.aInfo.array.set(info, ii*4);
+      }
+    });
+    geos.forEach(g=>{ g.attributes.aRnd.needsUpdate = true; g.attributes.aInfo.needsUpdate = true; });
+    return want > 0 ? r*got/want : 0;
+  }
+  function uploadPool(rend){
+    if(!PN) return;
+    for(let i=0;i<5;i++){ if(!rend.properties.get(attrTex[i]).__webglTexture){ attrTex[i].needsUpdate = true; continue; }
+      poolTex[i].needsUpdate = true; rend.copyTextureToTexture(new THREE.Vector2(0, R0), poolTex[i], attrTex[i]); }
+  }
+  return { geos, pgeo, total: PN ? K0 + PN : k, base: k, rankTex, attrTex, sowDetail, uploadPool, poolN: PN };
 }
 // The long axis of each flat face of each shape (triangles of one shape with about the same normal), found once from
 // the 3D geometry: a stroke on a clearly elongated face runs along it. Decided in 3D, it does not change with the view
@@ -1972,13 +2026,14 @@ void main(){
   }
 }`;
 
-const SOW = OPT.sow || (PHONE ? 1 : 2);                 // (phone, measured: twice the slots cost ~40% per frame even unused — see below)
-const STATE_S = SOW > 1 ? 448 : 320;                    // 448 x 448 = up to 200k strokes, one texel each (320: 102k)
-// STROKES FOR THE VIEW (user: "zoomed in, most of them are out of the picture — can't you make more inside?"): every model
-// is sown with SOW times the strokes it needs at its usual distance; only a share of them takes part, by the same random
-// rank that quality uses — 1/SOW at the usual distance, more as the view comes nearer (as many per area of PAPER as
-// before, instead of a few stretched marks), fewer far away. New ones grow in and dropped ones dry away, as always.
-function strokeShare(){ const z = Math.max(view.zoom, 0.05); return Math.min(1, quality/SOW*Math.min(SOW, Math.max(0.5, 1/(z*z)))); }
+const SOW = 1;                                          // (2 was tried: twice the slots everywhere cost the phone ~40% per frame)
+const STATE_S = PHONE ? 352 : 384;                      // one texel per stroke: the model's strokes (≤ ~92k) + the DETAIL POOL
+const POOL_MAX = OPT.pool === 0 ? 0 : PHONE ? 30000 : 56000;
+// STROKES FOR THE VIEW (user: "zoomed in, most of them are out of the picture"; "up to some number of strokes per pixel
+// squared"): besides the model's own strokes, a DETAIL POOL of slots is sown on the part of the model in view whenever
+// the view comes nearer than its usual distance, so the strokes per area of paper stay about what they are at that
+// distance (up to 4x the model's own density). See sowDetail in buildStrokes, maybeSow in render.
+function strokeShare(){ return Math.min(1, quality); }
 const strokeScenes = [0,1,2,3].map(()=>new THREE.Scene());
 const planScene = new THREE.Scene();
 const planMat = new THREE.ShaderMaterial({
@@ -2076,7 +2131,7 @@ function makeStrokeMesh(root, cs){
   const r = buildStrokes(root, (cs || 1)*SOW);
   const meshes = r.geos.map((g,i)=>{ const m = new THREE.Mesh(g, strokeMat); m.frustumCulled=false; strokeScenes[i].add(m); return m; });
   const points = new THREE.Points(r.pgeo, planMat); points.frustumCulled=false; planScene.add(points);
-  return { meshes, points, total:r.total, rankTex:r.rankTex, attrTex:r.attrTex };
+  return { meshes, points, total:r.total, base:r.base, rankTex:r.rankTex, attrTex:r.attrTex, sowDetail:r.sowDetail, uploadPool:r.uploadPool, poolN:r.poolN, rEff:0, lastSow:null };
 }
 tagShapes(group);
 strokeMeshes.pavilion = makeStrokeMesh(group);
@@ -2702,7 +2757,7 @@ function addModel(name, root, geo, mat, countScale){
   const dP = Math.min(1, Math.max(0, (Math.log((root.userData.nShapes||50)/80))/Math.log(700/80)));
   root.userData.brushK = 1 - 0.38*dP;
   const LN = LAYERS.reduce((a,l)=>a+l.n, 0);
-  countScale = Math.min((countScale||1)*(1 + 1.4*dP), 0.86*STATE_S*STATE_S/LN/SOW);   // (the stroke memory holds STATE_S²)
+  countScale = Math.min((countScale||1)*(1 + 1.4*dP), (OPT.capN || (PHONE ? 88064 : 86302))/LN);   // (the counts in use since this morning's phone/desktop builds: their pictures unchanged)   // (the model's own strokes; the rest of the memory is the detail pool)
   strokeMeshes[name] = makeStrokeMesh(root, countScale);
   loaded[name] = true;
 }
@@ -3234,8 +3289,8 @@ const cfgFor = name => CFG[name] || (CFG[name] = (()=>{ const c = Object.assign(
 let current = 'pavilion';
 let quality = QS.get('q') ? Number(QS.get('q')) : PHONE ? 0.75 : 1;
 function applyQuality(){ Object.values(strokeMeshes).forEach(m=>{ m.meshes.forEach(x=>{ x.geometry.instanceCount=OPT.sort ? x.geometry.userData.total : Math.floor(x.geometry.userData.total*quality); }); m.points.geometry.setDrawRange(0,OPT.sort ? m.total : Math.ceil(m.total*quality)); });
-  const q = strokeShare(); planMat.uniforms.uQK.value = q;
-  planMat.uniforms.uQN.value = OPT.sort ? Math.ceil((strokeMeshes[current] ? strokeMeshes[current].total : 1e9)*q) : 1e9; }   // (sorted strokes: quality by rank, see buildStrokes)
+  const q = strokeShare(), M = strokeMeshes[current]; planMat.uniforms.uQK.value = q*(1 + (M ? M.rEff : 0));
+  planMat.uniforms.uQN.value = OPT.sort ? Math.ceil((M ? M.base : 1e9)*q) : 1e9; }   // (sorted strokes: quality by rank, see buildStrokes)
 async function setScene(name){
   if(MODELS[name].load) await MODELS[name].load();
   current = name; const c = cfgFor(name);
@@ -3513,6 +3568,19 @@ function render(dt){
   const cp = Math.cos(view.pitch);
   camera.position.set(TG.x+dist*Math.sin(view.yaw)*cp, TG.y+dist*Math.sin(view.pitch), TG.z+dist*Math.cos(view.yaw)*cp);
   camera.lookAt(TG); camera.updateMatrixWorld();
+  { const M = strokeMeshes[current], q = strokeShare();
+    // the DETAIL POOL follows the view: sown again when the view has come nearer, or moved on, by enough (at most every
+    // 0.4 s); r = how much the model's own density must grow here for the usual strokes per area of paper
+    if(M && M.sowDetail && M.poolN){
+      const r = Math.min(3, Math.max(0, 1/(view.zoom*view.zoom) - 1)), L = M.lastSow, now = performance.now();
+      const moved = !L || Math.abs(view.yaw - L.yaw) > 0.18 || Math.abs(view.pitch - L.pitch) > 0.12 || Math.abs(Math.log(view.zoom/L.zoom)) > 0.10;
+      if((r > 0.05 && moved && (!L || now - L.t > 400 || resetStrokes)) || (r <= 0.05 && L && L.r > 0)){
+        const VP = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        M.rEff = M.sowDetail(VP, camera.position, r > 0.05 ? r : 0); M.uploadPool(renderer);
+        M.lastSow = { yaw:view.yaw, pitch:view.pitch, zoom:view.zoom, t:now, r: r > 0.05 ? r : 0 }; lastPlanKey = '';   // (new strokes: plan them)
+      }
+    }
+    if(OPT.sort && M){ planMat.uniforms.uQK.value = q*(1 + M.rEff); planMat.uniforms.uQN.value = Math.ceil(M.base*q); } }
 
   // (speed) the reference and the plan are a function of the view and a few settings only: when none of them changed since
   // the last frame (the ~1.3 s while strokes settle after a drag, the pauses of the opening turn) they are still in their
@@ -3537,11 +3605,10 @@ function render(dt){
   renderer.setRenderTarget(rtLit); renderer.render(aoScene, postCam);
   if(__sync) __sync('ao');
   // 2. the planner: every stroke works out the brush mark that fits its part of the picture
-  if(OPT.sort){ const q = strokeShare(); P.uQK.value = q; P.uQN.value = Math.ceil((strokeMeshes[current] ? strokeMeshes[current].total : 1e9)*q); }   // (the share follows the zoom)
   P.uLoose.value = loose; P.uCamDist.value = dist; P.uRefDist.value = base; P.uYaw.value = view.yaw; P.uPitch.value = view.pitch; P.uAspect.value = W/H;
   P.uFocal.value = H*0.5/t;
   if(OPT.quad){ const Q = planQMat.uniforms, M = strokeMeshes[current]; for(let i=0;i<5;i++) Q['tA'+i].value = M.attrTex[i]; Q.uNT.value = M.total; Q.uProj.value.copy(camera.projectionMatrix);
-    if(!OPT.sort) P.uQN.value = Math.ceil(M.total*quality); }
+    if(!OPT.sort) P.uQN.value = Math.ceil(M.base*quality); }
   if(light){ const A = anchMat.uniforms, M = strokeMeshes[current];
     A.tA0.value = M.attrTex[0]; A.tA1.value = M.attrTex[1]; A.tA4.value = M.attrTex[4]; A.tP4.value = rtPlan.texture[4]; A.tP0.value = rtPlan.texture[0]; A.tData.value = rtMain.texture[1]; A.tShape.value = rtMain.texture[3];
     A.uProj.value.copy(camera.projectionMatrix); A.uNT.value = M.total; A.uDYaw.value = view.yaw - lastFullPlan.yaw; A.uDPitch.value = view.pitch - lastFullPlan.pitch; A.uAspect.value = W/H; A.uRes.value.set(W,H);
