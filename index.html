@@ -910,7 +910,7 @@ uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR, uEarl
 // PLANNED AGAINST THE PAPER (readability study): lines and darks are the last glaze; what the first three glazes have
 // already put down (last frame's buffers) is subtracted, so a dark is never counted twice (black bars on boards, dabs on
 // tiles). They depend only on glazes 0-2, which do not depend on them: no feedback loop. uPaintRef 0 = the old rule.
-uniform sampler2D tG0p; uniform sampler2D tG1p; uniform sampler2D tG2p; uniform float uPaintRef;
+uniform sampler2D tG0p; uniform sampler2D tG1p; uniform sampler2D tG2p; uniform float uPaintRef, uSmallShape;
 vec3 underA(vec2 q){ vec4 a = texture2D(tG0p,q), b = texture2D(tG1p,q), c = texture2D(tG2p,q);
   return a.rgb/max(a.a,1e-3)*smoothstep(0.04,0.40,a.a) + b.rgb/max(b.a,1e-3)*smoothstep(0.17,0.35,b.a) + c.rgb/max(c.a,1e-3)*smoothstep(0.18,0.34,c.a); }
 uniform vec3 uShadow, uWarm, uWashA, uWashB, uSky, uSkyA, uSkyB;
@@ -1313,7 +1313,35 @@ void main(){
       dirT = vec2(cos(rr.z*6.283), sin(rr.z*6.283)); nT = vec2(-dirT.y, dirT.x);
       wetS = 1.0;
     }
-    hl = max(0.5*(Lp+Lm), 1.5*uK); hw = max(min(0.5*(Bp+Bm), hl), 0.9*uK);   // (round ends: never wider than long, or the end would cross the border)
+    // SMALL OBJECTS TAKE THEIR OWN SHAPE (readability study): a colour or modelling stroke that meets its OBJECT's outline on
+    // opposite sides runs on past it, and the cut-in (STROKE_FS) makes that edge — a small rectangle (a flag, a window, a
+    // board end) is filled to its corners instead of holding a round dab. In PAIRS only: the stroke's middle, which decides
+    // the object it is cut to, stays on its own object. Closed on 3-4 sides: one square-ended, solid stroke (boxy).
+    float areaIn = max(0.5*(Lp+Lm), 1.5*uK)*max(min(0.5*(Bp+Bm), max(0.5*(Lp+Lm), 1.5*uK)), 0.9*uK);   // (the area painted INSIDE its shape)
+    bool boxy = false;
+    if(layer > 0.5 && layer < 2.5 && (layer < 1.5 || mode > 1.5) && hasShape(e0) > 0.5 && vis > 0.02){
+      float ov = 0.45*hwDef + 1.5*uK, nHit = 0.0, lim = 0.95*hlDef*(narrowForm ? 2.0 : 1.0);
+      float onRing = 0.0;                                   // a SMALL object: within ~1.6 brush widths around, little of it is left
+      for(int i=0;i<8;i++){ vec2 q = uv + vec2(cos(float(i)*0.785398), sin(float(i)*0.785398))*1.6*sz/uRes; onRing += texture2D(tData,q).a*sameShape(texture2D(tShape,q), e0); }
+      bool smallObj = !narrowForm && onRing < 2.5 && uSmallShape > 0.5;
+      if(smallObj){  // a SMALL object a little larger than the brush: look twice as far; if it ends there,
+        float stL2 = 2.0*hlDef/6.0, stW2 = 2.0*hwDef/4.0;   // the stroke runs to its edge (one stroke fills a flag, not half of it)
+        if(Lp >= lim){ float t = traceOut(uv, dirT, stL2, 6, g0, s0, z0, e0, tol, mode); if(t < 1.9*hlDef) Lp = t; }
+        if(Lm >= lim){ float t = traceOut(uv, -dirT, stL2, 6, g0, s0, z0, e0, tol, mode); if(t < 1.9*hlDef) Lm = t; }
+        if(Bp >= 0.95*hwDef){ float t = traceOut(uv, nT, stW2, 4, g0, s0, z0, e0, tol, mode); if(t < 1.9*hwDef) Bp = t; }
+        if(Bm >= 0.95*hwDef){ float t = traceOut(uv, -nT, stW2, 4, g0, s0, z0, e0, tol, mode); if(t < 1.9*hwDef) Bm = t; }
+        lim = 1.9*hlDef; }
+      vec2 q; vec4 eq, dq;
+      q = uv + dirT*(Lp + 0.5*uK)/uRes; eq = texture2D(tShape,q); dq = texture2D(tData,q); bool hP = Lp < lim && (dq.a < 0.5 || sameShape(eq,e0) < 0.5);
+      q = uv - dirT*(Lm + 0.5*uK)/uRes; eq = texture2D(tShape,q); dq = texture2D(tData,q); bool hM = Lm < lim && (dq.a < 0.5 || sameShape(eq,e0) < 0.5);
+      q = uv + nT*(Bp + 0.5*uK)/uRes; eq = texture2D(tShape,q); dq = texture2D(tData,q); bool hBp = Bp < (smallObj ? 1.9 : 0.95)*hwDef && (dq.a < 0.5 || sameShape(eq,e0) < 0.5);
+      q = uv - nT*(Bm + 0.5*uK)/uRes; eq = texture2D(tShape,q); dq = texture2D(tData,q); bool hBm = Bm < (smallObj ? 1.9 : 0.95)*hwDef && (dq.a < 0.5 || sameShape(eq,e0) < 0.5);
+      if(hP && hM){ Lp += ov; Lm += ov; nHit += 2.0; } else if(hP || hM) nHit += 1.0;
+      if(hBp && hBm){ Bp += ov; Bm += ov; nHit += 2.0; } else if(hBp || hBm) nHit += 1.0;
+      boxy = nHit >= 3.0 && uSmallShape > 0.5;
+      if(uSmallShape < 0.5){ Lp = hP && hM ? Lp - ov : Lp; Lm = hP && hM ? Lm - ov : Lm; Bp = hBp && hBm ? Bp - ov : Bp; Bm = hBp && hBm ? Bm - ov : Bm; }   // (off: as before)
+    }
+    hl = max(0.5*(Lp+Lm), 1.5*uK); hw = max(min(0.5*(Bp+Bm), boxy ? 1.6*hl : hl), 0.9*uK);   // (round ends: never wider than long, or the end would cross the border; a boxy stroke may be wider)
     // a shape too small for this brush is left out (a painter would not dab at it): only darks pick out small things
     float roomy = smoothstep(0.3, 0.8, hl*hw/(0.12*hlDef*hwDef));   // (by the room the brush found: a long thin plane like a stair riser is kept)
     vec2 offPx = dirT*0.5*(Lp-Lm) + nT*0.5*(Bp-Bm);
@@ -1336,6 +1364,7 @@ void main(){
       vL = min(vL, max(hL, vC)*2.0); vR = min(vR, max(hR, vC)*2.0);   // (a value seen only at the very end stays at the end)
       ramp = vec4(vL, vC, narrowForm ? 2.0 : 1.0, vR);   // (z 2: wet all across, so the clear side stays clear)
     }
+    if(boxy && ramp.z < 0.5) ramp.w = 1.0;              // (tells STROKE_VS: a square-ended, solid brush)
     if(edgeDark){ hw = min(hw, 0.30*hwDef + 0.9*uK); hl = max(hl, hlDef*1.2); offPx = dirT*0.5*(Lp-Lm) + toEdge*h*0.35; }
 
     vec3 cS = W>1e-3 ? Wc*inv : c0.rgb;
@@ -1428,7 +1457,7 @@ void main(){
       float pxPerUnit = uFocal/max(vz,0.1);
       float have = vDen/(max(abs(ndv),0.12)*pxPerUnit*pxPerUnit);       // strokes of this kind per pixel, here (a sheet seen from behind counts too: it was thinned out to dabs)
       float cover = layer<0.5 ? 7.0 : layer<1.5 ? 9.0 : layer<2.5 ? 5.0 : 2.5;     // random placement: ~e^-cover of a wash is missed
-      float need = cover/(3.14159*hl*hw);                                // strokes per pixel for this many layers of paint
+      float need = cover/(3.14159*(uSmallShape > 0.5 ? min(hl*hw, areaIn) : hl*hw));   // strokes per pixel for this many layers of paint (counting only what is painted inside the shape)
       thinK = (need/max(have,1e-9))/max(rnd2, 1e-4);       // > 1: switched on; a little below: only just off
       if(thinK < 1.0){ heldAmt = amount; amount = 0.0; }   // (still reported, so a painted stroke can follow it)
     }
@@ -1500,7 +1529,8 @@ void main(){
   gl_Position = vec4(P/uRes*2.0-1.0, 0.0, 1.0);
   float half_ = 0.5*(s1-s0) + hw;
   vQ = vec2((s - 0.5*(s0+s1))/half_, position.y*1.18);
-  vCol = c; vP = vec3(wet, dry, 2.0+1.3*rr.y); vSeed = rr.x*40.0+rr.w*13.0;
+  vec4 rBox = texelFetch(tS3,tx,0); bool boxyS = rBox.z < 0.5 && rBox.w > 0.5;   // (a small object's stroke: square-ended and solid)
+  vCol = c; vP = vec3(wet, boxyS ? 0.0 : dry, boxyS ? 5.0 : 2.0+1.3*rr.y); vSeed = rr.x*40.0+rr.w*13.0;
   vWob = clamp(hw/(2.5*uRes.y/700.0), 0.0, 1.0);
   vRamp = texelFetch(tS3,tx,0);   // a fine line is drawn steadily: no ragged edge at that scale
   // CUTTING IN: a colour stroke (and a graded modelling stroke) belongs to the object under its middle, and its paint
@@ -1601,7 +1631,7 @@ const planScene = new THREE.Scene();
 const planMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
   uniforms:{
-    tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1},
+    tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
     uCamDist:{value:20}, uRefDist:{value:20}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()},
@@ -2734,7 +2764,7 @@ function render(dt){
   P.uCull.value = OPT.cull; P.uEarly.value = OPT.early; strokeMat.uniforms.uEarlyS.value = OPT.strokeEarly; wetMat.uniforms.uWetEarly.value = OPT.wetEarly; resolveMat.uniforms.uResDead.value = OPT.resolveDead;
   planFrame++;
   const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id,
-               PU.uPaintRef.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? planFrame : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
+               PU.uPaintRef.value, PU.uSmallShape.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? planFrame : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
   const replan = !OPT.skipPlan || key !== lastPlanKey; lastPlanKey = key;
   if(replan){
   // 1. the 3D picture the painter looks at
@@ -2829,7 +2859,7 @@ fit(); setMood(0,false);
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>canvas.classList.remove('faded'), 80); }
-window.__pavilion = { paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+window.__pavilion = { smallShape:(v)=>{ planMat.uniforms.uSmallShape.value=v; resetStrokes=true; dirty=true; }, paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
   passes:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4), f4=new Float32Array(4), acc={}; let t=0;
