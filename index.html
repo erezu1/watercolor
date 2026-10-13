@@ -66,12 +66,24 @@ canvas:active{cursor:grabbing}
 .hint .hint-hand circle{fill:currentColor;stroke:none;opacity:.8}
 .hint .hint-hand .hint-ring{fill:none;stroke:currentColor;stroke-width:1.5;opacity:.35}
 .hint .hint-hand{animation:hintSwipe 2.2s ease-in-out infinite}
+.hint .hint-anims{display:flex;align-items:center;gap:14px}
+.hint svg.hint-pinch{width:64px}
+.hint .hint-f1 circle,.hint .hint-f2 circle{fill:currentColor;stroke:none;opacity:.8}
+.hint .hint-f1 .hint-ring,.hint .hint-f2 .hint-ring{fill:none;stroke:currentColor;stroke-width:1.5;opacity:.35}
+.hint .hint-f1{animation:hintPinch1 2.2s ease-in-out infinite}
+.hint .hint-f2{animation:hintPinch2 2.2s ease-in-out infinite}
+@keyframes hintPinch1{0%,100%{transform:translate(-4px,4px)}50%{transform:translate(-12px,12px)}}
+@keyframes hintPinch2{0%,100%{transform:translate(4px,-4px)}50%{transform:translate(12px,-12px)}}
+.hint .hint-text{white-space:nowrap}
+.hint .hint-text span{font:inherit}
+.hint .hint-mouse{display:none}
+@media (pointer:fine){.hint .hint-mouse{display:inline}.hint .hint-touch{display:none}}
 .hint span{font-size:16px;font-style:italic;letter-spacing:.01em}
 /* while the first painting loads, the same card welcomes you; when it arrives the welcome fades into the drag hint */
-.hint svg,.hint .hint-text{transition:opacity .7s ease .25s}
+.hint .hint-anims,.hint .hint-text{transition:opacity .7s ease .25s}
 .hint .hint-welcome{position:absolute;inset:0;display:grid;place-items:center;padding:0 18px;text-align:center;font-size:18px;opacity:0;transition:opacity .5s ease}
 .hint.welcome .hint-welcome{opacity:1}
-.hint.welcome svg,.hint.welcome .hint-text{opacity:0;transition:none}
+.hint.welcome .hint-anims,.hint.welcome .hint-text{opacity:0;transition:none}
 @keyframes hintSwipe{0%,100%{transform:translateX(-30px)}50%{transform:translateX(30px)}}
 .hint.gone{opacity:0;visibility:hidden;transition:opacity .9s ease,visibility 0s linear .9s}   /* (really gone once faded: an invisible blurred card still showed as a rectangle through the menu's blur) */
 .toast{
@@ -164,7 +176,7 @@ body.menu-open .toast{opacity:0}
 body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 .about{margin:0;font-size:14px;font-style:italic;line-height:1.4;color:var(--ink-soft);text-align:center}
 .pick-btn:focus-visible,.choices button:focus-visible,.mood:focus-visible,.peek:focus-visible,canvas:focus-visible{outline:2px solid #4a5da8;outline-offset:2px}
-@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand{animation:none}.hint,.toast,.hint svg,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
+@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
 </style>
 
 </head>
@@ -173,9 +185,14 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
   <canvas id="c" tabindex="0" aria-label="A domed pavilion painted in watercolour. Drag to rotate the painting, pinch to zoom."></canvas>
   <div class="hint welcome" id="hint" aria-hidden="true">
     <span class="hint-welcome">Welcome to 3D paintings!</span>
-    <svg viewBox="0 0 120 56"><path class="hint-arc" d="M18 30 Q60 6 102 30"/><path class="hint-arr" d="M26 21 L16 31 L29 35"/><path class="hint-arr" d="M94 21 L104 31 L91 35"/>
-      <g class="hint-hand"><circle cx="60" cy="38" r="7"/><circle cx="60" cy="38" r="13" class="hint-ring"/></g></svg>
-    <span class="hint-text">Drag to rotate the painting</span>
+    <div class="hint-anims">
+      <svg viewBox="0 0 120 56"><path class="hint-arc" d="M18 30 Q60 6 102 30"/><path class="hint-arr" d="M26 21 L16 31 L29 35"/><path class="hint-arr" d="M94 21 L104 31 L91 35"/>
+        <g class="hint-hand"><circle cx="60" cy="38" r="7"/><circle cx="60" cy="38" r="13" class="hint-ring"/></g></svg>
+      <svg viewBox="0 0 64 56" class="hint-pinch"><path class="hint-arc" d="M8 52 L56 4"/><path class="hint-arr" d="M4 43 L4 54 L15 54"/><path class="hint-arr" d="M49 2 L60 2 L60 13"/>
+        <g class="hint-f1"><circle cx="32" cy="28" r="6"/><circle cx="32" cy="28" r="11" class="hint-ring"/></g>
+        <g class="hint-f2"><circle cx="32" cy="28" r="6"/><circle cx="32" cy="28" r="11" class="hint-ring"/></g></svg>
+    </div>
+    <span class="hint-text">Drag to turn · <span class="hint-touch">pinch</span><span class="hint-mouse">scroll</span> to zoom</span>
   </div>
   <div class="fail" id="fail">This painting needs WebGL 2, which your browser doesn’t seem to offer.</div>
 </div>
