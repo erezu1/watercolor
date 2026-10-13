@@ -1061,11 +1061,11 @@ vec2 arcOff(float t0, float k, float s){                // where a path that sta
 }`;
 const PLAN_VS = `
 attribute vec3 aPos; attribute vec3 aNor; attribute vec3 aTan; attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx; attribute float aDen; attribute float aRank;
-uniform float uS; uniform float uQN;
+uniform float uS; uniform float uQN; uniform float uQK;
 uniform sampler2D tData; uniform sampler2D tShape; uniform float uDepthRange, uYaw, uPitch, uAspect, uCull;
 varying vec3 vPos; varying vec3 vNor; varying vec4 vClip; varying vec4 vClip2; varying float vNdv; varying vec4 vRnd; varying vec4 vInfo; varying float vDen;
 void main(){
-  vPos = aPos; vNor = aNor; vRnd = aRnd; vInfo = aInfo; vDen = aDen;
+  vPos = aPos; vNor = aNor; vRnd = aRnd; vInfo = aInfo; vDen = aDen*uQK;
   mat4 VP = projectionMatrix*viewMatrix;
   vClip = VP*vec4(aPos,1.0); vClip2 = VP*vec4(aPos + aTan*(abs(aInfo.x-5.0) < 0.5 ? 1.0 : 0.2), 1.0);   // (a thin thing: its segment's far end)
   vNdv = dot(aNor, normalize(cameraPosition-aPos));
@@ -1957,7 +1957,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
+    uQK:{value:1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()}, uSkyAll:{value:0},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -1966,13 +1966,15 @@ const planMat = new THREE.ShaderMaterial({
 // (prototype) the same planner as one full-screen pass over the stroke texture: each fragment reads its stroke's inputs
 const PLANQ_FS = PLAN_FS
   .replace('varying vec3 vPos; varying vec3 vNor; varying vec4 vClip; varying vec4 vClip2; varying float vNdv; varying vec4 vRnd; varying vec4 vInfo; varying float vDen;',
-           'uniform sampler2D tA0; uniform sampler2D tA1; uniform sampler2D tA2; uniform sampler2D tA3; uniform sampler2D tA4; uniform mat4 uProj; uniform float uNT, uQN, uCull, uS;\nvec3 vPos; vec3 vNor; vec4 vClip; vec4 vClip2; float vNdv; vec4 vRnd; vec4 vInfo; float vDen;')
+           'uniform sampler2D tA0; uniform sampler2D tA1; uniform sampler2D tA2; uniform sampler2D tA3; uniform sampler2D tA4; uniform mat4 uProj; uniform float uNT, uQN, uCull, uS, uQK;\nvec3 vPos; vec3 vNor; vec4 vClip; vec4 vClip2; float vNdv; vec4 vRnd; vec4 vInfo; float vDen;')
   .replace('void main(){\n  float layer = vInfo.x;', 'void planMain(){\n  float layer = vInfo.x;')
   + `
 void main(){
   ivec2 tx = ivec2(gl_FragCoord.xy); float idx = float(tx.y)*uS + float(tx.x); if(idx >= uNT) discard;
   vec4 a0 = texelFetch(tA0,tx,0), a1 = texelFetch(tA1,tx,0), a2 = texelFetch(tA2,tx,0); vRnd = texelFetch(tA3,tx,0); vInfo = texelFetch(tA4,tx,0);
-  vPos = a0.xyz; vDen = a0.w; vNor = a1.xyz; vec3 aTan = a2.xyz;
+  // (quality < 1: a part of every layer is left out, so the strokes sown here are fewer — the planner grows and keeps the
+  // rest to cover as if they were all there; user: the phone's blue was patchy)
+  vPos = a0.xyz; vDen = a0.w*uQK; vNor = a1.xyz; vec3 aTan = a2.xyz;
   mat4 VP = uProj*viewMatrix;
   vClip = VP*vec4(vPos,1.0); vClip2 = VP*vec4(vPos + aTan*(abs(vInfo.x-5.0) < 0.5 ? 1.0 : 0.2), 1.0);
   vNdv = dot(vNor, normalize(cameraPosition-vPos));
@@ -3203,6 +3205,7 @@ const cfgFor = name => CFG[name] || (CFG[name] = (()=>{ const c = Object.assign(
 let current = 'pavilion';
 let quality = QS.get('q') ? Number(QS.get('q')) : PHONE ? 0.75 : 1;
 function applyQuality(){ Object.values(strokeMeshes).forEach(m=>{ m.meshes.forEach(x=>{ x.geometry.instanceCount=OPT.sort ? x.geometry.userData.total : Math.floor(x.geometry.userData.total*quality); }); m.points.geometry.setDrawRange(0,OPT.sort ? m.total : Math.ceil(m.total*quality)); });
+  planMat.uniforms.uQK.value = Math.min(1, quality);
   planMat.uniforms.uQN.value = OPT.sort ? Math.ceil((strokeMeshes[current] ? strokeMeshes[current].total : 1e9)*quality) : 1e9; }   // (sorted strokes: quality by rank, see buildStrokes)
 async function setScene(name){
   if(MODELS[name].load) await MODELS[name].load();
@@ -3489,7 +3492,7 @@ function render(dt){
   P.uCull.value = OPT.cull; P.uEarly.value = OPT.early; strokeMat.uniforms.uEarlyS.value = OPT.strokeEarly; wetMat.uniforms.uWetEarly.value = OPT.wetEarly; resolveMat.uniforms.uResDead.value = OPT.resolveDead;
   planFrame++;
   const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id,
-               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
+               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, PU.uQK.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
   const replan = !OPT.skipPlan || key !== lastPlanKey; lastPlanKey = key;
   // (OPT.halfPlan: while the view moves, every other frame only the anchors are moved — see ANCH_FS)
   const light = replan && OPT.halfPlan && OPT.quad && lightRun < OPT.halfPlan && restT < 0.05 && !resetStrokes && !__sync;
