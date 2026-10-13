@@ -1037,6 +1037,11 @@ function findThinThings(TA, TAR, nT){
     const perp = Math.sqrt(Math.max(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]-al*al, 0));
     if(perp < 3.5*(A.r + B.r)){ keep[i] = false; keep[j] = false; gp[gf(i)] = gf(j); }
   }
+  // A THICK piece (a chimney pipe, a stout post) is a surface too, with its lines like a board: taken out of the reference
+  // and left to its one line, it left a hole in what is behind it wherever that line was not drawn (user: the Moomin
+  // chimney "becomes transparent from some angles")
+  const thickR = (window.__OPT && window.__OPT.thickR !== undefined) ? window.__OPT.thickR : 0.5;
+  chains.forEach((c,i)=>{ if(c.r > thickR*maxR) keep[i] = false; });
   const out = [];
   chains.forEach((c,i)=>{ out.push({ knots:c.knots, r:c.r, board:!keep[i] }); if(!keep[i]) for(const t of c.tris) isLine[t] = 2; });
   // ... and its boards are ONE shape (one sail, one roof): strokes run along the whole of it instead of a dab per board
@@ -1094,6 +1099,7 @@ void main(){
 const PLAN_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape; uniform sampler2D tLine; uniform sampler2D tRaw; uniform sampler2D tThinC; uniform sampler2D tThinD;
+uniform float uJit, uCutK, uHtK, uRoundK, uLineMax, uResvT, uSunK, uSunLo;
 uniform vec2 uRes; uniform float uGrowMax, uCoarseMin, uCoarseSz, uToneK, uCoarseK, uCover1, uCoverG; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
 uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR, uEarly;   // (uShadeK: how strongly light and shade are told apart)
 // PLANNED AGAINST THE PAPER (readability study): lines and darks are the last glaze; what the first three glazes have
@@ -1316,7 +1322,9 @@ void main(){
       vec2 pa = (ca.xy/ca.w*0.5+0.5)*uRes, pb = (cb.xy/cb.w*0.5+0.5)*uRes;
       float len = length(pb-pa);
       dirT = len > 0.5 ? (pb-pa)/len : vec2(1.0,0.0);
-      hw = clamp(vInfo.z*uFocal/(0.5*(ca.w+cb.w)), max(1.0*uK, 1.1), 14.0*uK);   // (never thinner than a pixel: it would only show where pieces overlap)
+      hw = clamp(vInfo.z*uFocal/(0.5*(ca.w+cb.w)), max(1.0*uK, 1.1), uLineMax*uK);   // (never thinner than a pixel: it would only show where pieces overlap)
+      // (and as wide as the piece really is, up close too: the hole kept for it in the paint behind is its full width — the
+      // Moomin chimney up close was a 14 px line in a wider hole, read as a hole in the roof)
       hw *= mix(1.0, 0.80, smoothstep(2.5*uK, 5.0*uK, hw));   // (a thick beam: its measured radius is to its corners; a box is narrower than that)
       hl = 0.5*len + hw;
       tc = ((pa+pb)*0.5/uRes)*2.0-1.0;
@@ -1355,7 +1363,9 @@ void main(){
         if(vInfo.w < 1.5) Am = At;
         col = Am/0.9;
         amount = 0.9*smoothstep(0.04, 0.12, dot(Am, vec3(0.3333)))*smoothstep(0.05, 0.13, abs(cDiff/lw))*uCables;
-        if(rS/lw > 0.3){ col = harmonise(-log(clamp(own, 0.03, 1.0)))/0.9; amount = 0.9*uCables;   // (left as paper behind it: fill that hole)
+        if(rS/lw > uResvT){ col = harmonise(-log(clamp(own, 0.03, 1.0)))/0.9; amount = 0.9*uCables;   // (left as paper behind it: fill that hole —
+          // whenever there IS a hole: the line is cut to it, so it paints nothing else; at 0.3 a pipe partly lighter than its
+          // roof (the Moomin chimney) kept its hole and no line)
           // (the strokes behind left the thing's exact silhouette as paper: this line is drawn wider and cut to that hole,
           // so it fills it — drawn at its own width it left white slivers beside it and went dark where it missed: the ladder)
           hw = hw*1.6 + 1.5*uK; ramp = vec4(1.0, 1.0, 0.0, 2.0); }
@@ -1635,12 +1645,19 @@ void main(){
     // in front of a light one keeps its edge (the painter's counterchange; read from depth only)
     float cutIn = smoothstep(0.04, 0.20, Wn/25.0)*(1.0-smoothstep(0.55, 0.85, Wn/25.0));
     float lMe = dot(c0.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*c0.a), lNear = Nl/max(Wn,1e-3);
-    cutIn *= smoothstep(0.0, 0.15, lNear - lMe + 0.05);   // only where the nearer thing is as light as me or lighter: it needs the contrast
+    cutIn *= smoothstep(0.0, 0.15, lNear - lMe + 0.05)*uCutK;   // only where the nearer thing is as light as me or lighter: it needs the contrast
     float sat = (max(cS.r,max(cS.g,cS.b)) - min(cS.r,min(cS.g,cS.b)))/max(max(cS.r,max(cS.g,cS.b)), 1e-3);
-    float hiAmt = 0.85*smoothstep(0.12, 0.60, lumA)*(1.0-smoothstep(0.25, 0.6, sat))*hasShape(e0)*(bigShape && !narrowForm ? 1.0 : 0.25);   // (a narrow piece left as paper vanishes: a sail board, a post)   // light, pale materials in the light: bare paper (never on slivers: grass would speckle)
+    // THE KEY OF THIS VIEW (user: the Hill Castle from its sunny side was all paper): how much of the subject is in the
+    // sun, from a coarse grid over the picture. A painter lets the lights go to paper against shadows; when nearly all
+    // of it is lit there are no shadows to carry the picture, so the lit colours keep more of their own strength
+    float sunN = 0.0, sunW = 0.0;
+    for(int gy=0; gy<5; gy++) for(int gx=0; gx<5; gx++){ vec2 gq = (vec2(float(gx), float(gy)) + 0.5)/5.0;
+      float on = texture2D(tData, gq).a; sunN += on*(1.0 - smoothstep(0.10, 0.30, texture2D(tColor, gq).a)); sunW += on; }   // (sunN: how much is in SHADE)
+    float kSun = uSunK*(1.0 - smoothstep(uSunLo, uSunLo + 0.08, sunN/max(sunW, 1.0)))*step(2.5, sunW);
+    float hiAmt = (1.0 - 0.70*kSun)*0.85*smoothstep(0.12, 0.60, lumA)*(1.0-smoothstep(0.25, 0.6, sat))*hasShape(e0)*(bigShape && !narrowForm ? 1.0 : 0.25);   // (a narrow piece left as paper vanishes: a sail board, a post)   // light, pale materials in the light: bare paper (never on slivers: grass would speckle)
     float sP = hasShape(e0) > 0.5 ? (Pw > 0.5 ? Ps/Pw : s0) : s;   // the light of the plane the brush is on (averaged over that plane only)
     float lit = smoothstep(0.55,0.85,sP);
-    float roundF = smoothstep(0.012, 0.030, length(Gl/max(Gw,1e-3))*h);   // the light turns steadily across it: a round form
+    float roundF = smoothstep(0.012*uRoundK, 0.030*uRoundK, length(Gl/max(Gw,1e-3))*h);   // the light turns steadily across it: a round form
     float shade = inShade(sP), ht = (1.0-smoothstep(0.45, 0.72, sP))*(1.0-shade)*hasShape(e0)*(1.0-roundF);
     // COARSE OR SMOOTH (user: "unlike the pole, the mountain is coarse; the grass and the wall should have texture in the
     // painting"): how rough the surface is at the brush's scale — facets turning within the brush, its own texture
@@ -1650,15 +1667,15 @@ void main(){
     float roughN = smoothstep(0.004, 0.025, Nv/max(Nw,1.0)), roughT = smoothstep(0.03, 0.10, Tz/max(Tw,1.0)), roughB = busy;
     float coarse = uCoarseK*clamp(max(max(roughN, roughB)*(1.0 - roundF), uCoarseMin), 0.0, 1.0)*(narrowForm ? 0.0 : 1.0)*hasShape(e0)*(isSea ? 0.0 : 1.0);
     float paleK = smoothstep(0.12, 0.60, lumA)*(1.0-smoothstep(0.25, 0.6, sat));   // (a white or pale material: in half light it still reads white)
-    ht *= mix(1.0, 1.0 - smoothstep(0.15, 0.35, sP), paleK);   // only FLAT planes clearly turned away (a round form is modelled by the graded glaze)
+    ht *= mix(1.0, 1.0 - smoothstep(0.15, 0.35, sP), paleK)*uHtK;   // only FLAT planes clearly turned away (a round form is modelled by the graded glaze)
     col = Ab;
     if(layer<0.5){                                        // tea: a pale wash, interrupted by the lights
       amount = 0.42*(1.0-hiAmt*lit*(1.0-cutIn))*mix(1.0,1.25,uDetail);   // on a detailed model the first wash carries each face's colour
       if(rr.w < 0.15+0.25*uLoose){ col = mix(Ab, -log(clamp(mix(uWashA,uWashB,hash12(e0.zw*97.0)),0.05,1.0))*1.6, 0.35); }   // a varied tint, but one per shape (no spots)
     } else if(layer<1.5){                                 // coffee / milk: the colour of the shape
       amount = 0.62*(1.0-0.75*hiAmt*lit*(1.0-cutIn))*(1.0+0.5*cutIn)*(1.0+0.9*ht*mix(1.0, uShadeK, 0.35));
-      amount *= mix(1.18, 0.70, smoothstep(0.25, 0.90, sP)*hasShape(e0));   // value: a diluted wash where the plane is lit, a richer one where it turns away
-      col = Ab*(1.0 + (rr.y-0.5)*0.40*vec3(-0.6,0.05,0.6))*(1.0 + (rnd2-0.5)*uToneK*coarse*(1.0 - gGrain)) + uWarm*lit*0.8 + (uShadow*1.7*(1.0 - 0.5*paleK) + Ab*0.35)*ht*mix(1.0, uShadeK, 0.35);   // a plane turning away: a little darker and cooler — its OWN colour, not a blue (a white sign went blue)
+      amount *= mix(1.18, mix(0.70, 1.0, kSun), smoothstep(0.25, 0.90, sP)*hasShape(e0));   // value: a diluted wash where the plane is lit, a richer one where it turns away
+      col = Ab*(1.0 + (rr.y-0.5)*0.40*mix(uJit, 1.0, clamp(coarse, 0.0, 1.0))*vec3(-0.6,0.05,0.6))*(1.0 + (rnd2-0.5)*uToneK*coarse*(1.0 - gGrain)) + uWarm*lit*0.8 + (uShadow*1.7*(1.0 - 0.5*paleK) + Ab*0.35)*ht*mix(1.0, uShadeK, 0.35);   // a plane turning away: a little darker and cooler — its OWN colour, not a blue (a white sign went blue)
       if(uDbgP > 0.5){ col = vec3(0.05) + vec3(0.0,2.5,2.5)*ht + vec3(2.5,2.5,0.0)*(1.0-roomy); amount = 0.8; }   // debug: halftone (red), dropped as too small (blue)
     } else if(layer<2.5){                                 // the shadow passage: cool, transparent, carrying some local colour
       float shK = mix(1.0, uShadeK, 0.25);               // (a model's extra contrast, gently: the values now come from the model)
@@ -1828,7 +1845,7 @@ const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform float uPixShade, uDomK, uRimK;
+uniform sampler2D tLineS; uniform float uPixShade, uDomK, uRimK, uResvOn;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -1872,7 +1889,7 @@ void main(){
   float r = r0 + wob;
   float a = 1.0 - smoothstep(1.0-soft, 1.0, r);
   if(uEarlyS > 0.5 && a <= 0.0){ gl_FragColor = vec4(0.0); return; }
-  if(vRes > 0.5) a *= 1.0 - reserveAt(gl_FragCoord.xy/uRes);   // (also on a moved stroke's trail: it swept over the white frames while dragging)
+  if(vRes > 0.5) a *= 1.0 - uResvOn*reserveAt(gl_FragCoord.xy/uRes);   // (also on a moved stroke's trail: it swept over the white frames while dragging)
   if(vLum.y > 0.5){                                      // LIGHTS ARE RESERVED: a stroke paints around another object that is clearly lighter
     vec2 uvp = gl_FragCoord.xy/uRes; vec4 eP = texture2D(tShapeS, uvp);
     if(eP.z >= 0.25 && abs(eP.z - vShp.x) + abs(eP.w - vShp.y) > 7e-4){
@@ -1957,7 +1974,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uQK:{value:1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
+    uQK:{value:1}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:60}, uResvT:{value:0.02}, uSunK:{value:1}, uSunLo:{value:0.04}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()}, uSkyAll:{value:0},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -2036,7 +2053,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uResvOn:{value:1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -2247,7 +2264,7 @@ const QUAD_VS = `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(positio
 const AO_FS = `
 precision highp float;
 varying vec2 vUv;
-uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShapeA; uniform vec2 uResI; uniform float uKi, uDR, uFocal;
+uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShapeA; uniform vec2 uResI; uniform float uKi, uDR, uFocal, uZoomK;
 float zAt(vec2 q){ vec4 d = texture2D(tData, q); return (d.a > 0.5 && texture2D(tShapeA, q).z >= 0.25) ? d.b*uDR : -1.0; }   // (not on grass blades: the ground's slope was read off the blades)
 void main(){
   vec4 c = texture2D(tColor, vUv), d = texture2D(tData, vUv);
@@ -2274,7 +2291,9 @@ void main(){
   // a steady picture to paint from: the colour is softened WITHIN each shape (same piece, same depth), so a texture's
   // fine detail does not shimmer when the view moves by a fraction of a pixel; borders between shapes stay sharp
   vec4 e0 = texture2D(tShapeA, vUv); vec3 cs = c.rgb; float ws = 1.0;
-  float Rb = 2.6*uKi;
+  // (a size ON THE MODEL, not on the paper: zoomed in, the texture's detail grows with the model and came out as a mosaic
+  // of little patches — the turtle up close, user: "you can't see anything" — so the softening grows with it)
+  float Rb = 2.6*uKi*clamp(uZoomK, 1.0, 4.0);
   for(int i=0;i<10;i++){
     float a = float(i)*2.3999632 + 0.5, r = Rb*sqrt((float(i)+0.5)/10.0);
     vec2 q = vUv + vec2(cos(a), sin(a))*r*px;
@@ -2564,7 +2583,7 @@ void main(){
 }`;
 
 const aoMat = new THREE.ShaderMaterial({
-  uniforms:{ tColor:{value:null}, tData:{value:null}, tShapeA:{value:null}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uDR:SHARED.uDepthRange, uFocal:{value:500} },
+  uniforms:{ tColor:{value:null}, tData:{value:null}, tShapeA:{value:null}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uDR:SHARED.uDepthRange, uFocal:{value:500}, uZoomK:{value:1} },
   vertexShader:QUAD_VS, fragmentShader:AO_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending
 });
 const aoScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), aoMat); q.frustumCulled=false; aoScene.add(q); }
@@ -3492,7 +3511,7 @@ function render(dt){
   P.uCull.value = OPT.cull; P.uEarly.value = OPT.early; strokeMat.uniforms.uEarlyS.value = OPT.strokeEarly; wetMat.uniforms.uWetEarly.value = OPT.wetEarly; resolveMat.uniforms.uResDead.value = OPT.resolveDead;
   planFrame++;
   const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id,
-               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, PU.uQK.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
+               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, PU.uQK.value, PU.uJit.value, PU.uCutK.value, PU.uHtK.value, PU.uRoundK.value, PU.uLineMax.value, PU.uResvT.value, PU.uSunK.value, PU.uSunLo.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
   const replan = !OPT.skipPlan || key !== lastPlanKey; lastPlanKey = key;
   // (OPT.halfPlan: while the view moves, every other frame only the anchors are moved — see ANCH_FS)
   const light = replan && OPT.halfPlan && OPT.quad && lightRun < OPT.halfPlan && restT < 0.05 && !resetStrokes && !__sync;
@@ -3504,7 +3523,7 @@ function render(dt){
   camera.layers.set(1); renderer.setRenderTarget(rtThin); renderer.render(scene, camera); camera.layers.set(0);   // (the thin things, on their own)
 
   if(__sync) __sync('thin');
-  aoMat.uniforms.uFocal.value = H*0.5/t;
+  aoMat.uniforms.uFocal.value = H*0.5/t; aoMat.uniforms.uZoomK.value = OPT.zoomSoft === 0 ? 1 : 1/Math.max(view.zoom, 0.05);
   renderer.setRenderTarget(rtLit); renderer.render(aoScene, postCam);
   if(__sync) __sync('ao');
   // 2. the planner: every stroke works out the brush mark that fits its part of the picture
@@ -3662,7 +3681,7 @@ window.__pavilion = { rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }
     const root = MODELS[current].root(); let tris = 0; root.traverse(o=>{ if(o.isMesh){ const g=o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count)/3; } });
     return { strokes:L, refPx:[w,h], modelCover:+(cov/(w*h)).toFixed(3), shapesVisible:sh.size, shapesBig:nBig, colourSpreadInShape:+(varW/Math.max(wsum,1)).toFixed(3),
              colourJumpsPer1000px:+(1000*jumps/Math.max(inside,1)).toFixed(1), tris, nShapes:root.userData.nShapes, cfg:cfgFor(current).detail, holes:+(holes/Math.max(cand,1)).toFixed(3), mottle:+(mot/Math.max(mw,1)).toFixed(3) };
-  }, pixShade:(v)=>{ strokeMat.uniforms.uPixShade.value=v; dirty=true; }, wetRel:(v)=>{ wetMat.uniforms.uWetRel.value=v; dirty=true; }, smallShape:(v)=>{ planMat.uniforms.uSmallShape.value=v; resetStrokes=true; dirty=true; }, paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+  }, sunLo:(v)=>{ planMat.uniforms.uSunLo.value=v; resetStrokes=true; dirty=true; }, sunK:(v)=>{ planMat.uniforms.uSunK.value=v; resetStrokes=true; dirty=true; }, resvT:(v)=>{ planMat.uniforms.uResvT.value=v; resetStrokes=true; dirty=true; }, lineMax:(v)=>{ planMat.uniforms.uLineMax.value=v; resetStrokes=true; dirty=true; }, roundK:(v)=>{ planMat.uniforms.uRoundK.value=v; resetStrokes=true; dirty=true; }, htK:(v)=>{ planMat.uniforms.uHtK.value=v; resetStrokes=true; dirty=true; }, cutK:(v)=>{ planMat.uniforms.uCutK.value=v; resetStrokes=true; dirty=true; }, jit:(v)=>{ planMat.uniforms.uJit.value=v; resetStrokes=true; dirty=true; }, resvOn:(v)=>{ strokeMat.uniforms.uResvOn.value=v; dirty=true; }, pixShade:(v)=>{ strokeMat.uniforms.uPixShade.value=v; dirty=true; }, wetRel:(v)=>{ wetMat.uniforms.uWetRel.value=v; dirty=true; }, smallShape:(v)=>{ planMat.uniforms.uSmallShape.value=v; resetStrokes=true; dirty=true; }, paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
   perfInfo:()=>({ drawn:drawnN, fence:OPT.fence, kind:frameKind, restT, intScale, quality, W, H, phone:PHONE, halfPlan:OPT.halfPlan, settleEvery:OPT.settleEvery, scene:current }),   // (test: the phone benchmark page)
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
