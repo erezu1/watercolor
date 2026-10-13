@@ -1956,7 +1956,7 @@ const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uPixShade, uDomK, uRimK, uResvOn;
+uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -2009,6 +2009,21 @@ void main(){
     }
   }
   if(uEarlyS > 0.5 && a <= 0.0){ gl_FragColor = vec4(0.0); return; }
+  // A LINE PAINTS ONLY WHERE IT IS IN FRONT (user: the struts under the Dutch mill's deck): at this pixel the frontmost thin
+  // thing must be of the line's own colour, and no surface may lie in front of the thin picture
+  if(vRes < 0.5 && uLineOcc > 0.5){
+    vec2 qq = gl_FragCoord.xy/uRes; vec4 tD = texture2D(tThinDS, qq), mD = texture2D(tDataS, qq);
+    // (nothing thin is seen here or within ~2 px: the line's piece is hidden here — under a deck, behind a wall)
+    float near = tD.a; for(int k=0;k<8;k++){ float an = float(k)*0.7853982; near = max(near, texture2D(tThinDS, qq + vec2(cos(an), sin(an))*2.2/uRes).a); }
+    a *= step(0.5, near);
+    if(tD.a > 0.5){
+      vec3 own = exp(-vCol.rgb), seenC = texture2D(tThinCS, qq).rgb;   // (compared by HUE: the line's paint is shaded, the picture lit)
+      vec3 hO = own/max(dot(own, vec3(0.3333)), 1e-3), hS = seenC/max(dot(seenC, vec3(0.3333)), 1e-3);
+      float same = (1.0 - smoothstep(0.20, 0.40, length(hO - hS)))*(1.0 - smoothstep(0.40, 0.60, length(sqrt(seenC) - sqrt(own))));   // (hue, and how light: a dark strut under a tan deck)
+      float cov = (mD.a > 0.5 && tD.b > mD.b + 0.0004) ? 1.0 : 0.0;   // (a surface in front of the thin picture — even just in front: struts right under a deck)
+      a *= same*(1.0 - cov);
+    }
+  }
   if(vShp.z > 2.5){                                      // a light thin thing's line fills exactly the hole left for it
     float hole = 0.0;
     for(int k=0;k<4;k++){ vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
@@ -2171,7 +2186,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uResvOn:{value:1}, tRawS:{value:null}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
