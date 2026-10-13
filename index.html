@@ -228,7 +228,6 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
       <path class="hw-s hw-w hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/><path class="hw-s hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/>
       <path class="hw-s hw-w hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/><path class="hw-s hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/>
       <path class="hw-s hw-w hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/><path class="hw-s hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/></g></svg>
-    <span class="hw-sub">Painting…</span>
   </div>
   <div class="fail" id="fail">This painting needs WebGL 2, which your browser doesn’t seem to offer.</div>
 </div>
@@ -3289,15 +3288,16 @@ function showAddress(name){
   if(location.hash !== '#'+slugOf(p)) history[location.hash ? 'pushState' : 'replaceState'](null, '', '#'+slugOf(p));   // (Back returns to the painting before)
 }
 window.addEventListener('popstate', ()=>{ const id = fromAddress(); if(id && id !== current) goTo(id); });
+let lcT = 0;
 function goTo(name){
   if(name===current || switching) return;
   showAddress(name);
   const p = PAINTINGS.find(q=>q.id===name) || { title:'the test scene' };
-  const lc = $('loadcard'); if(p.heavy && !loaded[name] && !hint.classList.contains('welcome')){ $('loadTitle').textContent = p.title; lc.classList.add('on'); }
+  const lc = $('loadcard'); clearTimeout(lcT); if(p.heavy && !loaded[name] && !hint.classList.contains('welcome')){ $('loadTitle').textContent = p.title; lc.classList.add('on'); }
   // the painting fades out to the paper, the new one is prepared, then fades in
   const wait = ms => new Promise(r=>setTimeout(r, ms));
   canvas.classList.add('faded');
-  switching = wait(reduceMotion ? 0 : 450).then(()=>setScene(name)).then(()=>wait(120)).then(()=>{ lc.classList.remove('on'); canvas.classList.remove('faded'); arrived(); })
+  switching = wait(reduceMotion ? 0 : 450).then(()=>setScene(name)).then(()=>wait(120)).then(()=>{ canvas.classList.remove('faded'); lcT = setTimeout(()=>{ lc.classList.remove('on'); arrived(); }, reduceMotion ? 0 : 650); })   // (the card goes once the painting has faded in behind it)
     .catch(()=>{ lc.classList.remove('on'); canvas.classList.remove('faded'); arrived(); toast.textContent='This one needs a newer browser'; toast.classList.add('on'); setTimeout(()=>toast.classList.remove('on'),1800); })
     .finally(()=>{ switching = null; });
 }
@@ -3356,7 +3356,8 @@ const pointers = new Map(); let pinch0=0, zoom0=1;
 const hint = $('hint');
 function touch(){ if(!touched){ touched=true; hint.classList.add('gone'); } }
 // the card first welcomes you while the first painting loads; when it arrives the welcome turns into the drag hint,
-// which fades away after 5 s even without a touch (the opening turn goes on)
+// which fades away after 5 s even without a touch (the opening turn goes on). (Called once the painting has faded in
+// behind the card: the welcome then turns into the hint.)
 function arrived(){ if(!hint.classList.contains('welcome')) return; hint.classList.remove('welcome'); setTimeout(()=>hint.classList.add('gone'), 5000); }
 canvas.addEventListener('pointerdown', e=>{
   canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY,h:[{t:e.timeStamp,x:e.clientX,y:e.clientY}]}); touch();
@@ -3613,7 +3614,7 @@ fit(); setMood(0,false);
 { const want = fromAddress(), first = want || PAINTINGS[0].id;
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
-  if(first !== 'pavilion') goTo(first); else setTimeout(()=>{ canvas.classList.remove('faded'); arrived(); }, 80); }
+  if(first !== 'pavilion') goTo(first); else setTimeout(()=>{ canvas.classList.remove('faded'); setTimeout(arrived, reduceMotion ? 0 : 650); }, 80); }
 window.__pavilion = { rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }, tone:(t,d)=>{ planMat.uniforms.uToneK.value=t; strokeMat.uniforms.uDomK.value=d; resetStrokes=true; dirty=true; }, coarseSz:(v)=>{ planMat.uniforms.uCoarseSz.value=v; resetStrokes=true; dirty=true; }, cover:(a,g)=>{ planMat.uniforms.uCover1.value=a; planMat.uniforms.uCoverG.value=g; resetStrokes=true; dirty=true; }, coarse:(v)=>{ planMat.uniforms.uCoarseK.value=v; wetMat.uniforms.uPaintStop.value=v > 0 ? 1 : 0; resetStrokes=true; dirty=true; }, growMax:(v)=>{ planMat.uniforms.uGrowMax.value=v; resetStrokes=true; dirty=true; }, analyze:()=>{   // (test: what this view paints with — strokes alive per glaze and their size on the
     // paper, and the reference: how much of the picture is the model, how many shapes, how much colour varies inside them)
     const gl = renderer.getContext(), rd = (rt, att, w, h) => { const b = new Float32Array(w*h*4); renderer.setRenderTarget(rt);
