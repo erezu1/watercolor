@@ -383,6 +383,12 @@ void main(){
   vec3 albedo = pow(gm, vec3(2.2))*mix(vec3(1.0), uTint, 0.6);
 #else
   vec3 albedo = uAlbedo;
+#ifdef PATINA
+  // (the pavilion's copper dome: verdigris streaks running down it, a few darker weathered patches — its texture)
+  float pt = fbm3(vec3(vObj.x*4.0, vObj.y*0.9, vObj.z*4.0)), pb = fbm3(vObj*1.6 + 3.0);
+  albedo *= mix(0.78, 1.18, pt)*mix(0.85, 1.05, smoothstep(0.35, 0.65, pb));
+  albedo = mix(albedo, albedo*vec3(0.85, 1.05, 1.0), smoothstep(0.55, 0.8, pt));
+#endif
 #endif
 #ifdef GRASS
   N = vec3(0.0, 1.0, 0.0);                              // grass is part of the ground: the ground's light, the shadow at the blade's foot
@@ -423,7 +429,7 @@ function matFor(role){
       glslVersion: THREE.GLSL3,
       uniforms:{ uL:SHARED.uL, uDepthRange:SHARED.uDepthRange, uLightVP:SHARED.uLightVP, uLightV:SHARED.uLightV, tShadow:SHARED.tShadow,
                  uAlbedo:{value:new THREE.Vector3(1,1,1)}, uFade:{value:role==='ground'?1:0} },
-      defines: role==='grass' ? { GRASS:'' } : {},
+      defines: role==='grass' ? { GRASS:'' } : role==='dome' ? { PATINA:'' } : {},
       vertexShader:SCENE_VS, fragmentShader:SCENE_FS
     });
   }
@@ -455,6 +461,14 @@ for(let i=0;i<10;i++){
 add(CYL(1.88,1.88,0.28,64),'stone',0,2.26,0);
 add(CYL(2.0,1.92,0.1,64),'stone',0,2.45,0);
 add(new THREE.SphereGeometry(1.82,56,26,0,Math.PI*2,0,Math.PI/2),'dome',0,2.5,0,1,0.86,1);
+// gilded RIBS down the dome (12 meridians): its structure as a painter would draw it (thin things: painted as lines)
+for(let i=0;i<12;i++){
+  const th = i/12*Math.PI*2 + 0.13, pts = [];
+  for(let k=0;k<=16;k++){ const ph = 0.12 + (Math.PI/2 - 0.14)*k/16, r = 1.82 + 0.03;
+    pts.push(new THREE.Vector3(Math.sin(ph)*Math.cos(th)*r, 2.5 + 0.86*Math.cos(ph)*r, Math.sin(ph)*Math.sin(th)*r)); }
+  const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.032, 6, false), matFor('gold'));
+  m.userData.role = 'gold'; group.add(m);
+}
 add(CYL(0.2,0.25,0.44,20),'stone',0,4.04,0);
 add(new THREE.ConeGeometry(0.28,0.4,20),'gold',0,4.46,0);
 add(new THREE.SphereGeometry(0.075,14,10),'gold',0,4.72,0);
@@ -1095,7 +1109,7 @@ void main(){
     // reflected light on its far side (three values across the stroke, as the graded modelling strokes have)
     vec2 P0 = vClip.xy/max(vClip.w,1e-3), P1 = vClip2.xy/max(vClip2.w,1e-3);
     vec2 dW = (P1-P0)*uRes; vec2 nW = length(dW) > 1e-3 ? vec2(-dW.y, dW.x)/length(dW) : vec2(0.0);
-    vec3 pr0 = vec3(0.0), pr1 = vec3(0.0), pr2 = vec3(0.0); float pn = 0.0; vec3 Au = vec3(0.0); float dRef = 0.0, dPnt = 0.0, rS = 0.0;
+    vec3 pr0 = vec3(0.0), pr1 = vec3(0.0), pr2 = vec3(0.0); float pn = 0.0; vec3 Au = vec3(0.0), lcm = vec3(0.0), lcA = vec3(0.0), lcmA = vec3(0.0); float lwA = 0.0; float dRef = 0.0, dPnt = 0.0, rS = 0.0;
     for(int i=0;i<=16;i++){
       vec4 c = mix(vClip, vClip2, float(i)/16.0);
       vec2 q = c.xy/max(c.w,1e-3)*0.5+0.5;
@@ -1103,8 +1117,9 @@ void main(){
       bool seen = c.w > 0.05 && q.x>0.0 && q.x<1.0 && q.y>0.0 && q.y<1.0 && (d.a < 0.5 || c.w <= d.b*uDepthRange + tolZ + 0.0015*c.w);
       if(seen){ if(r0 < 0) r0 = i; if(i - r0 > b1 - b0){ b0 = r0; b1 = i; } } else r0 = -1;
       vec4 dT = texture2D(tThinD, q);
+      if(seen && dT.a > 0.5){ vec4 ca = texture2D(tThinC, q); lcA += ca.rgb*exp(-shadeA(ca.a, dT.g, 0.35, dT.r)); lwA += 1.0; lcmA += ca.rgb; }   // (its colour where its own picture shows it at ANY depth: a fallback)
       if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < max(tolZ, 2.2*vInfo.z + 0.008)){   // (a wide piece's surface is far from its centre line: the chimney)
-        vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0; Au += underA(q);   // its material colour, darkened only by real shade (a white bar in half light stays white)
+        vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0; Au += underA(q); lcm += cc.rgb;   // its material colour, darkened only by real shade (a white bar in half light stays white)
         float lOwn = dot(cc.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cc.a);
         { vec4 mC = texture2D(tColor, q); vec3 cm = d.a > 0.5 ? mC.rgb : vec3(0.85), r3 = max((cc.rgb + 0.04)/(cm + 0.04), (cc.rgb*(0.35+0.65*cc.a) + 0.03)/((d.a > 0.5 ? mC.rgb*(0.35+0.65*mC.a) : vec3(0.85)) + 0.03));   // (the SAME test as the strokes'
           rS += (d.a > 0.5 && dT.b > d.b + 0.002) ? 0.0 : smoothstep(1.15, 1.45, max(r3.r, max(r3.g, r3.b))); }        // reserve, STROKE_FS reserveAt)
@@ -1143,6 +1158,10 @@ void main(){
       // one (a white frame on a blue wall) is RESERVED in the strokes behind it (STROKE_FS/WET_FS) and gets its own
       // light colour here; a darker one (lattice, cable) is painted on top
       if(lw > 0.5) amount *= smoothstep(0.05, 0.13, abs(cDiff/lw));
+      // (its centre line is a chord between knots: on a CURVED piece — a dome's rib — it can run inside the curve, where
+      // the depth test finds no colour; then its colour wherever its own picture shows it; only a cable too thin to
+      // show at all is a dark line)
+      if(lw < 0.5 && lwA > 0.5){ lc = lcA*(1.0/lwA); lcm = lcmA*(1.0/lwA); lw = 1.0; }
       vec3 own = lw > 0.5 ? lc/lw : vec3(0.08);           // (too thin to show in the reference: a dark line, like a cable against the sky)
       bool formed = pn > 0.5 && hw > 2.2*uK;
       if(formed){                                          // wide enough to show its form: graded across (a cable stays one line)
@@ -1151,7 +1170,7 @@ void main(){
         ramp = vec4(clamp(-log(clamp(lum3(pr0), 0.03, 1.0))/Am, 0.35, 1.6), clamp(-log(clamp(lum3(pr1), 0.03, 1.0))/Am, 0.35, 1.6), 1.0,
                     clamp(-log(clamp(lum3(pr2), 0.03, 1.0))/Am, 0.35, 1.6));
       }
-      float dk = smoothstep(0.45, 0.20, dot(own, vec3(0.2126,0.7152,0.0722)));   // (only a dark thing gets the firm dark accent)
+      float dk = smoothstep(0.45, 0.20, dot(lw > 0.5 ? lcm/lw : own, vec3(0.2126,0.7152,0.0722)));   // (only a dark MATERIAL gets the firm dark accent — a gold rib in shade is shaded gold, not black)
       col = harmonise(-log(clamp(own, 0.03, 1.0)))*mix(1.0, 1.15, dk) + (uShadow*0.6 + vec3(0.12))*dk + uShadow*0.15*(1.0-dk)*(1.0 - smoothstep(0.55, 0.80, lum3(own)));   // a fine line (a white one stays white)
       if(formed) col = harmonise(-log(clamp(own, 0.03, 1.0)))*1.05 + uShadow*0.15*(1.0 - smoothstep(0.55, 0.80, lum3(own)));
       if(uPaintRef > 0.5 && lw > 0.5){
@@ -1975,7 +1994,7 @@ const WET_FS = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D tA; uniform sampler2D tB; uniform sampler2D tF; uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape;
-uniform vec2 uStep; uniform float uDR, uFirst, uWetEarly;
+uniform vec2 uStep; uniform float uDR, uFirst, uWetEarly, uWetRel;
 layout(location=0) out highp vec4 oA;
 layout(location=1) out highp vec4 oB;
 layout(location=2) out highp vec4 oF;
@@ -2003,10 +2022,15 @@ void main(){
   float ang = (nW - 0.5)*0.9; vec2 stp = mat2(cos(ang), sin(ang), -sin(ang), cos(ang))*uStep;
   float zsW = clamp(d0.b*uDR/13.0, 0.7, 3.0);   // (depth limits relative to the view, as in the planner)
   float r0w = 1.0 - resW(vUv), mv0 = mv(c0.a, d0.g); vec3 n0 = octDec(e0.xy);   // (the same for both sides: once)
+  // HOW WET, relative to the room the object has: taps on ANOTHER object (or off the model) do not count. Divided by all 9
+  // taps, a narrow part (a column, a post, a riser) could never be wet — its strokes stayed separate dabs (user: "why
+  // don't the strokes that make the pole blend inside it?"). Taps on the same object that the paint cannot reach
+  // (a crease, a value step) still count, so those edges stay crisp.
+  float nObj = 1.0;
   for(int side=-1; side<=1; side+=2){                   // the paint flows out each way until it meets a border
-    float zp = d0.b*uDR; vec3 np = n0; float okA = d0.a*r0w, okB = d0.a*r0w;
+    float zp = d0.b*uDR; vec3 np = n0; float okA = d0.a*r0w, okB = d0.a*r0w, lastIn = 1.0;
     for(int k=1;k<=4;k++){
-      if(uWetEarly > 0.5 && okA + okB <= 0.0) break;   // (speed: both flows stopped: the rest adds nothing)
+      if(uWetEarly > 0.5 && okA + okB <= 0.0){ nObj += lastIn*float(5 - k); break; }   // (speed: both flows stopped; the object goes on as far as we know)
       vec2 q = vUv + stp*float(side*k);
       vec4 d = texture(tData, q), e = texture(tShape, q), cq = texture(tColor, q); vec3 n = octDec(e.xy);
       float gd = length(sqrt(cq.rgb)-g0), mvq = mv(cq.a, d.g);
@@ -2015,6 +2039,7 @@ void main(){
       float shaped = step(0.25, e.z)*step(0.25, e0.z);
       float same = shaped*(1.0-step(7e-4, abs(e.z-e0.z)+abs(e.w-e0.w)));
       float alike = (1.0-shaped)*(1.0-step(0.12, gd));   // slivers join what they look like
+      lastIn = d.a*max(same, alike); nObj += lastIn;
       // (within one object the paint keeps to its own TEXTURE colour: a sign's blue frame must not flood its white panel;
       // light and shade are not in this colour, so the shades of one colour still blend)
       float sameCol = 1.0 - smoothstep(0.10, 0.20, gd);
@@ -2038,7 +2063,7 @@ void main(){
     }
   }
   oA = sA/wA; oB = sB/wB;
-  oF = vec4(fA/9.0, fB/9.0, 0.0, 1.0);
+  oF = uWetRel > 0.5 ? vec4(fA/nObj, fB/nObj, 0.0, 1.0) : vec4(fA/9.0, fB/9.0, 0.0, 1.0);
 }`;
 const RESOLVE_FS = `
 precision highp float;
@@ -2244,7 +2269,7 @@ const aoMat = new THREE.ShaderMaterial({
 const aoScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), aoMat); q.frustumCulled=false; aoScene.add(q); }
 const wetMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
-  uniforms:{ tA:{value:null}, tB:{value:null}, tF:{value:null}, tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tThinC:{value:null}, tThinD:{value:null}, uStep:{value:new THREE.Vector2()}, uDR:SHARED.uDepthRange, uFirst:{value:1}, uWetEarly:{value:1} },
+  uniforms:{ tA:{value:null}, tB:{value:null}, tF:{value:null}, tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tThinC:{value:null}, tThinD:{value:null}, uStep:{value:new THREE.Vector2()}, uDR:SHARED.uDepthRange, uFirst:{value:1}, uWetEarly:{value:1}, uWetRel:{value:1} },
   vertexShader:QUAD_VS, fragmentShader:WET_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending
 });
 const wetScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), wetMat); q.frustumCulled=false; wetScene.add(q); }
@@ -2477,7 +2502,7 @@ function buildRods(){
   strokeMeshes.rods = makeStrokeMesh(rodsGroup);
   loaded.rods = true;
 }
-const mill2Group = packGroup(), mill3Group = packGroup(), lightGroup = packGroup(), moominGroup = packGroup(), bridgeGroup = packGroup(), castleGroup = packGroup();
+const mill2Group = packGroup(), mill3Group = packGroup(), lightGroup = packGroup(), moominGroup = packGroup(), bridgeGroup = packGroup(), castleGroup = packGroup(), medievalGroup = packGroup();
 
 // Framing, sun and brush for a model are worked out from its bounds and size; a model may override any of them here.
 // (To add a model: put its meshes in a group, call makeStrokeMesh(group), add an entry to MODELS — usually just its view.)
@@ -2530,7 +2555,7 @@ const MODELS = {
                fade:{ c:new THREE.Vector2(0.45,-0.1), r:5.9, y:-2.84 } },   // (a larger sea, fading out from just beyond the island)   // (more of its sea)   // (its own sea: faded in a ring round the island, not at the sea's far edges)
   moomin:  { root:()=>moominGroup, yaw:0.70, pitch:0.38, fit:0.88, shadeK:1.3, load:()=>loadPack('moomin', 'moomin_house', moominGroup, { ground:true, lift:1.4 }) },
   bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup, { plate:{ col:[230,169,118], base:[97,63,41], r:5.6 } }) },
-  castle:  { root:()=>castleGroup, yaw:2.6, pitch:0.30, fit:1.0, shadeK:1.3, fade:null, load:()=>loadPack('castle', 'floating_castle', castleGroup, {}) }   // (it floats: no ground, no fade)
+  castle:  { root:()=>castleGroup, yaw:2.9, pitch:0.38, fit:1.15, shadeK:1.0, fade:null, load:()=>loadPack('castle', 'floating_castle', castleGroup, {}) }   // (it floats: no ground, no fade)
 };
 const CFG = {};
 // the sun is set as a painter sets up the subject: from the front-left of its OPENING view, high (three-quarter light),
@@ -2911,7 +2936,7 @@ fit(); setMood(0,false);
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>canvas.classList.remove('faded'), 80); }
-window.__pavilion = { smallShape:(v)=>{ planMat.uniforms.uSmallShape.value=v; resetStrokes=true; dirty=true; }, paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+window.__pavilion = { wetRel:(v)=>{ wetMat.uniforms.uWetRel.value=v; dirty=true; }, smallShape:(v)=>{ planMat.uniforms.uSmallShape.value=v; resetStrokes=true; dirty=true; }, paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
   passes:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4), f4=new Float32Array(4), acc={}; let t=0;
