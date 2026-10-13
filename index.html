@@ -2580,13 +2580,13 @@ function loadPack(name, data, root, opt){
     if(opt.byColour) geo = splitByColour(geo, opt.byColour);
     if(opt.declutter) declutter(geo, opt.declutter);   // (the clutter left out: the Hill Castle's people, barrels and carts)
     if(opt.dropOutside) dropOutside(geo, opt.dropOutside);
-    if(opt.ground) addGround(root, geo, opt.ground.y, opt.ground.grass);
+    const tileCol = imgs.map(im => { const c = document.createElement('canvas'); c.width = c.height = 8; const x = c.getContext('2d'); x.drawImage(im, 0, 0, 8, 8);
+      const d = x.getImageData(0, 0, 8, 8).data; const m = [0,0,0]; for(let i=0;i<64;i++) for(let k=0;k<3;k++) m[k] += d[i*4+k]/255/64; return m; });   // (each texture's mean colour)
+    if(opt.ground) addGround(root, geo, opt.ground.y, opt.ground.grass, opt.ground.r ? { c:opt.ground.c, r:opt.ground.r, col:greenOf(geo, tileCol) } : null);
     if(opt.sea) addSea(root, geo, opt.sea);
     if(opt.skyAll) root.userData.skyAll = true;
     if(opt.areaPow) root.userData.areaPow = opt.areaPow;
-    if(opt.grass){ const tc = imgs.map(im => { const c = document.createElement('canvas'); c.width = c.height = 8; const x = c.getContext('2d'); x.drawImage(im, 0, 0, 8, 8);
-        const d = x.getImageData(0, 0, 8, 8).data; const m = [0,0,0]; for(let i=0;i<64;i++) for(let k=0;k<3;k++) m[k] += d[i*4+k]/255/64; return m; });   // (each texture's mean colour)
-      addGrassOn(root, geo, tc, opt.grass); }
+    if(opt.grass) addGrassOn(root, geo, tileCol, opt.grass);
     if(opt.plate){ const pl = addPlateGround(geo, opt.plate); root.userData.fade = pl.fade; root.userData.frameBox = pl.frameBox; }
     addModel(name, root, geo, makeModelMat(atlasTexture(cv), G, 1, opt.lift), d.countScale || 1.4);
   })());
@@ -2645,15 +2645,16 @@ function addPlateGround(geo, pg){
 }
 // A grassy ground under a model that stands on nothing: a disc in the palette's ground colour, and grass tufts around
 // the model's foot (thin blades, painted as soft dabs like the pavilion's grass). Works for any model.
-function addGround(root, geo, gy, gs){
+function addGround(root, geo, gy, gs, own){
   geo.computeBoundingBox(); const bb = geo.boundingBox, pos = geo.attributes.position;
-  const y0 = gy !== undefined ? gy : bb.min.y, h = bb.max.y - bb.min.y, cx = (bb.min.x+bb.max.x)/2, cz = (bb.min.z+bb.max.z)/2;
+  const y0 = gy !== undefined ? gy : bb.min.y, h = bb.max.y - bb.min.y, cx = own ? own.c[0] : (bb.min.x+bb.max.x)/2, cz = own ? own.c[1] : (bb.min.z+bb.max.z)/2;
   let foot = 0;                                           // how far the model's foot reaches (vertices near the bottom)
   for(let i=0;i<pos.count;i++) if(pos.getY(i) < y0 + 0.06*h) foot = Math.max(foot, Math.hypot(pos.getX(i)-cx, pos.getZ(i)-cz));
   foot = Math.max(foot, 0.08*Math.max(bb.max.x-bb.min.x, bb.max.z-bb.min.z));
-  const R = Math.max(2.1*foot, 0.30*Math.max(bb.max.x-bb.min.x, bb.max.z-bb.min.z));
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(R, R*1.02, 0.02*h, 72), matFor('ground'));
-  disc.position.set(cx, y0 - 0.01*h, cz); disc.userData.role = 'ground'; root.add(disc);
+  const R = own ? own.r : Math.max(2.1*foot, 0.30*Math.max(bb.max.x-bb.min.x, bb.max.z-bb.min.z));
+  if(own) appendDisc(geo, cx, y0, cz, R, own.col);       // (the model's OWN ground: its own colour, painted like the model)
+  else { const disc = new THREE.Mesh(new THREE.CylinderGeometry(R, R*1.02, 0.02*h, 72), matFor('ground'));
+    disc.position.set(cx, y0 - 0.01*h, cz); disc.userData.role = 'ground'; root.add(disc); }
   const rg = mulberry32(11), P = [], N = [], R3 = [], s = gs || R/3.7;   // (blades sized like the pavilion's, scaled to this ground)
   for(let c=0;c<110;c++){
     const a = rg()*Math.PI*2, r = foot*1.05 + Math.sqrt(rg())*(R*0.97 - foot*1.05);
@@ -2672,6 +2673,38 @@ function addGround(root, geo, gy, gs){
   g.setAttribute('position', new THREE.Float32BufferAttribute(P,3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N,3)); g.setAttribute('aRoot', new THREE.Float32BufferAttribute(R3,3));
   const m = matFor('grass'); m.side = THREE.DoubleSide;
   const grass = new THREE.Mesh(g, m); grass.userData.role = 'grass'; grass.frustumCulled = false; root.add(grass);
+}
+// A ROUND GROUND OF THE MODEL'S OWN (the Hill Castle: user — "the grass floor the same colour as the terraces, and a
+// smaller circle"): a disc appended to the model's mesh in a colour of the model (linear), so it gets exactly the same
+// colour treatment and light as the terraces (a separate disc in the palette's ground colour did not match)
+function appendDisc(geo, cx, y, cz, R, col){
+  const pos = geo.attributes.position, nor = geo.attributes.normal, cl = geo.attributes.aCol, uvt = geo.attributes.aUvT, nV = pos.count, S = 96;
+  const P = new Float32Array((nV+S+1)*3), N = new Float32Array((nV+S+1)*3), C = new Float32Array((nV+S+1)*3), U = new Float32Array((nV+S+1)*3);
+  P.set(pos.array); N.set(nor.array); C.set(cl.array); U.set(uvt.array);
+  for(let i=0;i<=S;i++){ const j = nV+i, a = i/S*Math.PI*2, r = i === S ? 0 : R;
+    P[j*3] = cx + (i === S ? 0 : Math.cos(a)*r); P[j*3+1] = y; P[j*3+2] = cz + (i === S ? 0 : Math.sin(a)*r); N[j*3+1] = 1; C.set(col, j*3); U[j*3+2] = -1; }
+  const idx = Array.from(geo.index.array); for(let i=0;i<S;i++) idx.push(nV+S, nV+(i+1)%S, nV+i);
+  geo.setAttribute('position', new THREE.BufferAttribute(P,3)); geo.setAttribute('normal', new THREE.BufferAttribute(N,3));
+  geo.setAttribute('aCol', new THREE.BufferAttribute(C,3)); geo.setAttribute('aUvT', new THREE.BufferAttribute(U,3)); geo.setIndex(idx);
+  if(geo.userData.grp){ const g = new Int32Array(nV+S+1); g.set(geo.userData.grp); let m = 0; for(const v of geo.userData.grp) m = Math.max(m, v); g.fill(m+1, nV); geo.userData.grp = g; }
+}
+// the model's own GREEN (its open grass): of the green materials on upward faces covering >= 15% of them, the lightest —
+// texture mean x vertex colour, linear
+function greenOf(geo, tileCol){
+  const pos = geo.attributes.position, nor = geo.attributes.normal, col = geo.attributes.aCol, uvt = geo.attributes.aUvT, idx = geo.index;
+  const by = new Map(); const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();   // (per material)
+  for(let t=0;t<idx.count/3;t++){ const a = idx.getX(t*3), b = idx.getX(t*3+1), c = idx.getX(t*3+2); if(nor.getY(a) < 0.75) continue;
+    const tl = Math.round(uvt.getZ(a)), lc = [col.getX(a), col.getY(a), col.getZ(a)].map(v => Math.pow(v, 1/2.2));
+    const cc = tl >= 0 && tileCol[tl % 100] ? tileCol[tl % 100].map((v, k) => v*lc[k]) : lc;
+    if(!(cc[1] >= cc[0] && cc[1] > 1.25*cc[2] && cc[1] > 0.25)) continue;
+    va.fromBufferAttribute(pos,a); vb.fromBufferAttribute(pos,b).sub(va); vc.fromBufferAttribute(pos,c).sub(va); const ar = vb.cross(vc).length();
+    const key = tl >= 0 ? 'T'+tl : cc.map(v => Math.round(v*16)).join(','); let e = by.get(key); if(!e){ e = [0,0,0,0]; by.set(key, e); }
+    for(let k=0;k<3;k++) e[k] += Math.pow(cc[k], 2.2)*ar; e[3] += ar; }
+  // (of the greens covering a good share, the LIGHTEST: the open grass of the terraces, not the dark forest)
+  let tot = 0; for(const e of by.values()) tot += e[3];
+  const lum = e => (0.2126*e[0] + 0.7152*e[1] + 0.0722*e[2])/e[3];
+  let best = null; for(const e of by.values()) if(e[3] >= 0.15*tot && (!best || lum(e) > lum(best))) best = e;
+  return best ? best.slice(0,3).map(v => v/best[3]) : [0.3, 0.45, 0.15];
 }
 // LOOSE PIECES OUTSIDE THE SUBJECT go (a model cut out of a larger scene: the Hill Castle's tree left standing on the
 // cut edge, a forest chunk hanging off it): each connected piece smaller than 5% of the model whose middle lies
@@ -2800,7 +2833,7 @@ const MODELS = {
                // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
             
              pitchMin:0.25,   // (its hill stands in a painted ground, so the camera may circle low; not lower than this: the ground's far edge)
-             fade:{ c:new THREE.Vector2(-0.25,-0.26), r:5.0, y:1.25 }, load:()=>loadPack('medieval', 'medieval', medievalGroup, { areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6 }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
+             fade:{ c:new THREE.Vector2(-0.25,-0.26), r:4.6, y:1.25 }, load:()=>loadPack('medieval', 'medieval', medievalGroup, { areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6, c:[-0.25,-0.26], r:4.4 }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
   castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:1.0, strokeK:0.55, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
 };
 const CFG = {};
