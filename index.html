@@ -949,6 +949,7 @@ function buildStrokes(root, countScale, skyN){
   // SOW THE POOL for this view: on the triangles in the picture and facing it, with each layer's own weights, r times
   // the model's own density there (r 0: empty it). Returns how much of that it could sow (the pool is finite).
   const PR = Math.ceil(PN/STATE_S), poolTex = PN ? tA.map(a=>{ const t = new THREE.DataTexture(a.subarray(K0*4, (K0 + PR*STATE_S)*4), STATE_S, PR, THREE.RGBAFormat, THREE.FloatType); t.minFilter = t.magFilter = THREE.NearestFilter; return t; }) : null;
+  const slotTri = new Int32Array(PN).fill(-1), slotFree = new Float64Array(PN), rp = mulberry32(4711);
   const vis = new Uint8Array(nT), up2 = new THREE.Vector3(0,1,0), nrm2 = new THREE.Vector3(), tan2 = new THREE.Vector3(), tmp2 = new THREE.Vector3(), con2 = new THREE.Vector3();
   function sowDetail(VP, cam, r){
     if(!PN) return 0;
@@ -958,17 +959,26 @@ function buildStrokes(root, countScale, skyN){
       const x = (e[0]*cx + e[4]*cy + e[8]*cz + e[12])/w, y = (e[1]*cx + e[5]*cy + e[9]*cz + e[13])/w;
       const f = (TN[b]+TN[b+3]+TN[b+6])*(cam.x-cx) + (TN[b+1]+TN[b+4]+TN[b+7])*(cam.y-cy) + (TN[b+2]+TN[b+5]+TN[b+8])*(cam.z-cz);
       vis[i] = (Math.abs(x) < 1.08 && Math.abs(y) < 1.08 && f > 0) ? 1 : 0; }
-    const rp = mulberry32(4711), aP = root.userData.areaPow || 1; let want = 0, got = 0;
+    // (INCREMENTAL, user: "a burst of colours" while dragging: re-sown slots that were still painted slid across the
+    // picture to their new places. Now a pool stroke still in view keeps its place; one that left the view is let go
+    // (it dries away as usual); only a slot empty for 1.5 s takes a new place — nothing that is painted ever moves)
+    const now = performance.now(), aP = root.userData.areaPow || 1; let want = 0, got = 0;
     const slots = LAYERS.map(()=>[]); for(let j=0;j<PN;j++) slots[poolLi[j]].push(j);
     LAYERS.forEach((L,li)=>{
       const cdf = new Float64Array(nT); let acc = 0;
       for(let i=0;i<nT;i++){ acc += vis[i] ? (aP === 1 ? TAR[i] : Math.pow(TAR[i], aP))*(L.w[TRO[i]]||0) : 0; cdf[i] = acc; }
-      const need = layAcc[li] > 0 ? r*layLn[li]*acc/layAcc[li] : 0, sl = slots[li], n = Math.min(sl.length, Math.round(need));
-      want += need; got += n;
-      for(let q=0;q<sl.length;q++){
-        const j = sl[q], i = K0 + j, g = geos[poolGeo[j]], ii = poolInst[j];
-        if(q >= n || acc <= 0){ tA[0].set([0,-1000,0,0], i*4); continue; }
+      const need = layAcc[li] > 0 ? r*layLn[li]*acc/layAcc[li] : 0, sl = slots[li];
+      let n = Math.min(sl.length, Math.round(need)); want += need;
+      const kept = [], free = [];
+      for(const j of sl){ const t = slotTri[j];
+        if(t >= 0 && vis[t] && acc > 0) kept.push(j);
+        else { if(t >= 0){ slotTri[j] = -1; slotFree[j] = now; tA[0].set([0,-1000,0,0], (K0+j)*4); } if(now - slotFree[j] > 1500) free.push(j); } }
+      while(kept.length > n){ const j = kept.pop(); slotTri[j] = -1; slotFree[j] = now; tA[0].set([0,-1000,0,0], (K0+j)*4); }   // (fewer wanted: let some go)
+      let q = 0;
+      for(; kept.length + q < n && q < free.length; q++){
+        const j = free[q], i = K0 + j, g = geos[poolGeo[j]], ii = poolInst[j];
         const rr0 = rp()*acc; let lo = 0, hi = nT-1; while(lo<hi){ const mid=(lo+hi)>>1; if(cdf[mid]<rr0) lo=mid+1; else hi=mid; }
+        slotTri[j] = lo;
         const b9 = lo*9; let u = rp(), v = rp(); if(u+v>1){ u=1-u; v=1-v; } const w = 1-u-v;
         const px = TA[b9]*w+TA[b9+3]*u+TA[b9+6]*v, py = TA[b9+1]*w+TA[b9+4]*u+TA[b9+7]*v, pz = TA[b9+2]*w+TA[b9+5]*u+TA[b9+8]*v;
         nrm2.set(TN[b9]*w+TN[b9+3]*u+TN[b9+6]*v, TN[b9+1]*w+TN[b9+4]*u+TN[b9+7]*v, TN[b9+2]*w+TN[b9+5]*u+TN[b9+8]*v).normalize();
@@ -983,6 +993,7 @@ function buildStrokes(root, countScale, skyN){
         tA[1].set([nrm2.x, nrm2.y, nrm2.z, -1-j], i*4); tA[2].set([tan2.x, tan2.y, tan2.z, 0], i*4); tA[3].set(rnd, i*4); tA[4].set(info, i*4);
         g.attributes.aRnd.array.set(rnd, ii*4); g.attributes.aInfo.array.set(info, ii*4);
       }
+      got += kept.length + q;
     });
     geos.forEach(g=>{ g.attributes.aRnd.needsUpdate = true; g.attributes.aInfo.needsUpdate = true; });
     return want > 0 ? r*got/want : 0;
