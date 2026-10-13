@@ -1192,7 +1192,7 @@ const PLAN_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape; uniform sampler2D tLine; uniform sampler2D tRaw; uniform sampler2D tThinC; uniform sampler2D tThinD;
 uniform float uShadowOwn, uLineAll, uWhiteLines;
-uniform float uJit, uCutK, uHtK, uRoundK, uLineMax, uResvT, uSunK, uSunLo, uInkK, uCoverC, uBoardT; uniform float uDryHi, uDryFleck;
+uniform float uJit, uCutK, uHtK, uRoundK, uLineMax, uResvT, uSunK, uSunLo, uInkK, uCoverC, uBoardT; uniform float uDryHi;
 uniform vec2 uRes; uniform float uGrowMax, uCoarseMin, uCoarseSz, uToneK, uCoarseK, uCover1, uCoverG; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
 uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR, uEarly;   // (uShadeK: how strongly light and shade are told apart)
 // PLANNED AGAINST THE PAPER (readability study): lines and darks are the last glaze; what the first three glazes have
@@ -1596,9 +1596,7 @@ void main(){
     float busy = smoothstep(0.14, 0.28, Bz/max(Bw,1.0));
     // a textured surface in the light (thatch, planks, brick) gets a few dry-brush strokes of a slightly darker tone of
     // its own colour, along the face: its lit side is not one flat wash
-    float texBusy = layer > 3.5 && layer < 4.5 ? max(smoothstep(0.035, 0.10, Tz/max(Tw,1.0)), uDryFleck*smoothstep(0.3, 0.6, texture2D(tLine, uv).r))*hasShape(e0)*step(4.0, Tw) : 0.0;   // (a painted pattern or a single shadow edge is not 'busy')
-    // (a DRY material — rock, fur, a turtle's shell — gets the dry-brush marks too, even where its texture is calm:
-    // user, the turtle "too blend")
+    float texBusy = layer > 3.5 && layer < 4.5 ? smoothstep(0.035, 0.10, Tz/max(Tw,1.0))*hasShape(e0)*step(4.0, Tw) : 0.0;   // (a painted pattern or a single shadow edge is not 'busy')
     sz *= mix(1.0, mix(1.6, 1.15, uDetail), smoothF*isMid);
     // A SMALLER BRUSH FOR TEXTURE (user: "smaller strokes there — like the roof"; "the mountain and the green are too
     // blended"): where the surface is rough or textured at the brush's scale (irregular facets, its own texture, light
@@ -1898,7 +1896,7 @@ const STROKE_VS = `
 precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
-uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut;
+uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke;
 varying vec2 vLum;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
@@ -1918,8 +1916,12 @@ void main(){
   else if(layer<5.5){ wet=0.04; dry=0.10; }
   else { wet=1.0; dry=0.0; }
   wet = mix(wet, 0.35, wetK*0.7); dry *= 1.0-0.75*wetK;   // a calm shape is painted wet (but its edge stays a brush edge)
-  if(dissolving){ wet = 1.0; dry = 0.0; }                 // (a dissolving stroke: all wet, its edge melting)
   float s0 = max(b.x, 0.0), s1 = b.y, hw = b.z;
+  // A DRY MATERIAL (tLine.r at the stroke's middle: rock, fur, a turtle's shell) is painted with a drier brush: crisper
+  // edges that do not bleed, and bristle gaps — the wash too (user: the turtle and castle "still too wet")
+  { float md = uDryStroke*smoothstep(0.3, 0.6, texture(tLineV, (a.xy + arcOff(a.z, a.w, 0.5*(s0 + s1)))/uRes).r);
+    if(layer < 3.5){ wet *= max(1.0 - 0.7*md, 0.0); dry = max(dry, min((layer < 0.5 ? 0.30 : 0.45)*md, 0.9)); } }
+  if(dissolving){ wet = 1.0; dry = 0.0; }                 // (a dissolving stroke: all wet, its edge melting)
   float e0 = s0 - hw*1.18, e1 = s1 + hw*1.18;              // the strip covers the path plus its round ends (and a margin)
   float s = mix(e0, e1, position.x*0.5+0.5);
   float sc = clamp(s, s0, s1);
@@ -2112,7 +2114,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uQK:{value:1}, uDryHi:{value:OPT.dryHi !== undefined ? OPT.dryHi : 1}, uDryFleck:{value:OPT.dryFleck !== undefined ? OPT.dryFleck : 0.8}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uShadowOwn:{value:0}, uLineAll:{value:0}, uWhiteLines:{value:0}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
+    uQK:{value:1}, uDryHi:{value:OPT.dryHi !== undefined ? OPT.dryHi : 1}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uShadowOwn:{value:0}, uLineAll:{value:0}, uWhiteLines:{value:0}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()}, uSkyAll:{value:0},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -2191,7 +2193,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -3838,7 +3840,7 @@ function fit(){
   aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tLineA.value = rtMain.texture[2]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.tShapeA.value = rtShapeM.texture; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
   camera.aspect = W/H; camera.updateProjectionMatrix();
   const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtShapeM.texture; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.tThinC.value=rtThin.texture[0]; P.tThinD.value=rtThin.texture[1]; P.tG0p.value=rtGlaze[0].texture; P.tG1p.value=rtGlaze[1].texture; P.tG2p.value=rtGlaze[2].texture; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
-  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtShapeM.texture; strokeMat.uniforms.tRawS.value = rtMain.texture[0]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1]; strokeMat.uniforms.tLineS.value = rtMain.texture[2];
+  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtShapeM.texture; strokeMat.uniforms.tLineV.value = rtMain.texture[2]; strokeMat.uniforms.tRawS.value = rtMain.texture[0]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1]; strokeMat.uniforms.tLineS.value = rtMain.texture[2];
   const Rz = resolveMat.uniforms; [0,1,2,3].forEach(i=>{ Rz['tG'+i].value = rtGlaze[i].texture; }); Rz.uResI.value.set(W,H); Rz.uKi.value = Math.min(W,H)/700;
   Rz.tThinDR.value = rtThin.texture[1]; Rz.tThinCR.value = rtThin.texture[0]; Rz.tRawR.value = rtMain.texture[0];
   Rz.tShapeR.value = rtMain.texture[3]; Rz.tColorR.value = rtLit.texture; Rz.tDataR.value = rtMain.texture[1]; Rz.tW1.value = rtWet[1].texture[0]; Rz.tW2.value = rtWet[1].texture[1]; Rz.tWF.value = rtWet[1].texture[2];
