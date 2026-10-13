@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3.5c-4.9 0-8.5 3.6-8.5 8.1 0 4.6 3.7 8.4 8 8.4 1.5 0 2.3-.8 2.3-1.9 0-1.4-1.3-1.8-1.3-3.1 0-1.1.9-1.8 2-1.8h2.2c2.4 0 4-1.6 4-3.9 0-3.4-3.8-5.8-8.7-5.8z' fill='%23f4efe4' stroke='%233a3833' stroke-width='1.7' stroke-linejoin='round'/%3E%3Ccircle cx='7.6' cy='11.4' r='1.5' fill='%233f6fa8'/%3E%3Ccircle cx='9.6' cy='7.6' r='1.5' fill='%23c2463c'/%3E%3Ccircle cx='14' cy='7' r='1.5' fill='%23d9a63a'/%3E%3Ccircle cx='17.2' cy='9.9' r='1.5' fill='%235f8a4e'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&display=block" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -57,7 +58,7 @@ canvas.instant{transition:none}
 canvas:active{cursor:grabbing}
 .hint{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
-  display:grid;justify-items:center;gap:6px;padding:16px 22px 14px;border-radius:18px;
+  display:grid;justify-items:center;align-content:center;gap:8px;padding:20px 26px 18px;border-radius:22px;min-width:min(330px,86vw);min-height:180px;box-sizing:border-box;
   background:rgba(251,248,241,.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
   box-shadow:0 10px 30px -14px var(--shadow);color:#4a4337;transition:opacity .9s ease;
 }
@@ -78,10 +79,22 @@ canvas:active{cursor:grabbing}
 .hint .hint-text span{font:inherit}
 .hint .hint-mouse{display:none}
 @media (pointer:fine){.hint .hint-mouse{display:inline}.hint .hint-touch{display:none}}
-.hint span{font-size:16px;font-style:italic;letter-spacing:.01em}
+.hint span{font-family:'Fraunces',var(--serif);font-size:17px;letter-spacing:.005em;font-variation-settings:'opsz' 24}
 /* while the first painting loads, the same card welcomes you; when it arrives the welcome fades into the drag hint */
 .hint .hint-anims,.hint .hint-text{transition:opacity .7s ease .25s}
-.hint .hint-welcome{position:absolute;inset:0;display:grid;place-items:center;padding:0 18px;text-align:center;font-size:18px;opacity:0;transition:opacity .5s ease}
+.hint .hint-welcome{position:absolute;inset:0;display:grid;align-content:center;justify-items:center;gap:6px;padding:0 20px;text-align:center;opacity:0;transition:opacity .5s ease}
+.hint .hw-title{font-size:26px;font-weight:500;line-height:1.15;text-wrap:balance;font-variation-settings:'opsz' 72;color:#3f382d}
+.hint .hw-sub{font-size:14.5px;opacity:.7}
+/* (while the first painting loads: three watercolour strokes paint themselves, one after another, and dry away) */
+.hint .hw-brush{width:240px;height:58px;overflow:visible}
+.hint .hw-s{fill:none;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;opacity:0;animation:hwPaint 3.6s cubic-bezier(.45,.05,.35,1) infinite}
+.hint .hw-brush g{mix-blend-mode:multiply}
+.hint .hw-s1{stroke:#7fa6c9;stroke-width:9;--a:.62}
+.hint .hw-s2{stroke:#dca55e;stroke-width:7;--a:.62;animation-delay:.45s}
+.hint .hw-s3{stroke:#9db27a;stroke-width:6;--a:.62;animation-delay:.9s}
+.hint .hw-w{stroke-width:17;--a:.22}                    /* (the pale wash the pigment sits in) */
+.hint .hw-w.hw-s3{stroke-width:13}.hint .hw-w.hw-s2{stroke-width:14}
+@keyframes hwPaint{0%{stroke-dashoffset:1;opacity:var(--a)}38%{stroke-dashoffset:0;opacity:var(--a)}72%{stroke-dashoffset:0;opacity:calc(var(--a)*.8)}92%,100%{stroke-dashoffset:0;opacity:0}}
 .hint.welcome .hint-welcome{opacity:1}
 .hint.welcome .hint-anims,.hint.welcome .hint-text{opacity:0;transition:none}
 @keyframes hintSwipe{0%,100%{transform:translateX(-30px)}50%{transform:translateX(30px)}}
@@ -176,7 +189,7 @@ body.menu-open .toast{opacity:0}
 body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 .about{margin:0;font-size:14px;font-style:italic;line-height:1.4;color:var(--ink-soft);text-align:center}
 .pick-btn:focus-visible,.choices button:focus-visible,.mood:focus-visible,.peek:focus-visible,canvas:focus-visible{outline:2px solid #4a5da8;outline-offset:2px}
-@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
+@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hint .hw-s{animation:none;stroke-dashoffset:0;opacity:.6}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
 </style>
 
 </head>
@@ -184,7 +197,18 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 <div id="sheet">
   <canvas id="c" tabindex="0" aria-label="A domed pavilion painted in watercolour. Drag to rotate the painting, pinch to zoom."></canvas>
   <div class="hint welcome" id="hint" aria-hidden="true">
-    <span class="hint-welcome">Welcome to 3D paintings!</span>
+    <span class="hint-welcome">
+      <span class="hw-title">Welcome to 3D paintings</span>
+      <svg class="hw-brush" viewBox="0 0 200 48" aria-hidden="true">
+        <defs><filter id="wcEdge" x="-10%" y="-40%" width="120%" height="180%"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="7"/><feGaussianBlur stdDeviation="0.6"/></filter></defs>
+        <g filter="url(#wcEdge)">
+          <path class="hw-s hw-w hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/><path class="hw-s hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/>
+          <path class="hw-s hw-w hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/><path class="hw-s hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/>
+          <path class="hw-s hw-w hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/><path class="hw-s hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/>
+        </g>
+      </svg>
+      <span class="hw-sub">Mixing the paints…</span>
+    </span>
     <div class="hint-anims">
       <svg viewBox="0 0 120 56"><path class="hint-arc" d="M18 30 Q60 6 102 30"/><path class="hint-arr" d="M26 21 L16 31 L29 35"/><path class="hint-arr" d="M94 21 L104 31 L91 35"/>
         <g class="hint-hand"><circle cx="60" cy="38" r="7"/><circle cx="60" cy="38" r="13" class="hint-ring"/></g></svg>
@@ -346,8 +370,9 @@ const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: r
 const MOODS = [
   { name:'Verdigris', stone:0xeee6d6, deep:0xc4b598, dome:0x7ba89b, ground:0xb5c48f, grass:0xa3bd74, tree:0x667f66, door:0x5a463e, path:0xece0c8, gold:0xd6a853,
     shadow:[0.70,0.73,0.88], warm:[0.96,0.87,0.64], washA:0xc4d9e6, washB:0xf0d8b6, sky:0xb3cde0, skyHaze:0xf3e2c8, sea:0x7fa6b2, paper:0xf3eee3 },
-  { name:'Rouen',     stone:0xe8decb, deep:0xc6b99e, dome:0x7f9bab, ground:0xb0b97c, grass:0xb5bf6e, tree:0x60775a, door:0x56453b, path:0xdfcaa3, gold:0xc98d52,
-    shadow:[0.66,0.71,0.83], warm:[0.94,0.82,0.58], washA:0xbdd0d9, washB:0xe3c69c, sky:0xa7c2d8, skyHaze:0xeadcc3, sea:0x7091a6, paper:0xf1eadc },
+  // (Rouen: Monet's cathedral in the afternoon — golden light, violet shadows, a lilac sky; user: it was too like Verdigris)
+  { name:'Rouen',     stone:0xf0dcc0, deep:0xcdb08e, dome:0x8c86b4, ground:0xbabd78, grass:0xb3b866, tree:0x6f6a4e, door:0x56453b, path:0xe9cfa6, gold:0xd98c44,
+    shadow:[0.74,0.62,0.88], warm:[1.00,0.80,0.52], washA:0xcdbfdc, washB:0xf2c08e, sky:0xc4b6d8, skyHaze:0xf6d6b0, sea:0x7c7fae, paper:0xf4ead8 },
   { name:'Bluebird',  stone:0xf1e5d9, deep:0xd9bfa6, dome:0x3b63b3, ground:0xc4c97f, grass:0xaebf5c, tree:0x8f9a48, door:0x3f3330, path:0xf1ddc6, gold:0xe19145,
     shadow:[0.62,0.67,0.87], warm:[0.98,0.80,0.62], washA:0xa5c4e6, washB:0xf4bca3, sky:0x9bbfe8, skyHaze:0xf7e4d9, sea:0x4d7db8, paper:0xf5f4f2 },
   { name:'Sepia',     stone:0xe2d2b3, deep:0xc2a97e, dome:0x948f69, ground:0xcdb780, grass:0xb9a766, tree:0x84744c, door:0x503c2b, path:0xdac293, gold:0xb97d3d,
