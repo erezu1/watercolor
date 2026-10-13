@@ -754,6 +754,10 @@ function buildStrokes(root, countScale, skyN){
   { const per = new Map(); for(let i=0;i<nT;i++) if(thin.isLine[i]){ if(!per.has(TM[i])) per.set(TM[i], new Map()); per.get(TM[i]).set(TT[i], thin.isLine[i]); }
     for(const [o, set] of per) splitLines(o, set); }
   const rg = mulberry32(2024);
+  // (a model standing in its own sea: rock below the water line is sown like the rest (the same random sequence, so
+  // nothing else moves), but those strokes are sunk far out of sight — at a low view they were nearly as near as the
+  // water above them and showed through it as dark marks)
+  let seaY = null; for(let i=0;i<nT;i++) if(TW[i]) seaY = Math.max(seaY ?? -1e9, TA[i*9+1], TA[i*9+4], TA[i*9+7]);
   const nSeg = thin.chains.reduce((a,c)=>a+c.knots.length-1, 0);
   const skyLow = root.userData.skyAll ? 2600 : 0;          // (a subject in the air: sky below it too)
   const total = LAYERS.reduce((s,l)=>s+Math.round(l.n*countScale),0) + nSeg + skyN + skyLow;
@@ -782,7 +786,7 @@ function buildStrokes(root, countScale, skyN){
         if(pa && role !== 'line'){ tan.set(pa[0],pa[1],pa[2]); tan.addScaledVector(nrm, -tan.dot(nrm)); } }   // a frame): then along it
       if(tan.lengthSq()<1e-6) tan.set(1,0,0);
       tan.normalize();
-      S.pos.set([px,py,pz],k*3); S.nor.set([nrm.x,nrm.y,nrm.z],k*3); S.tan.set([tan.x,tan.y,tan.z],k*3);
+      S.pos.set([px, (seaY !== null && !TW[lo] && py < seaY) ? py - 1000 : py, pz],k*3); S.nor.set([nrm.x,nrm.y,nrm.z],k*3); S.tan.set([tan.x,tan.y,tan.z],k*3);
       S.rnd.set([rg(),rg(),rg(),rg()],k*4);
       S.info.set([li, TW[lo] ? 11 : KIND_ID[role], 0.85+0.3*rg(), L.asp*(0.8+0.5*rg())*(TW[lo] ? 2.4 : 1.0)],k*4);   // (on the sea: long level strokes)
       S.den[k] = Ln*(L.w[role]||0)/acc; S.glaze[k] = L.glaze;
@@ -3117,7 +3121,8 @@ const MODELS = {
             
              pitchMin:0.25,   // (its hill stands in a painted ground, so the camera may circle low; not lower than this: the ground's far edge)
              fade:{ c:new THREE.Vector2(-0.25,-0.26), r:4.6, y:1.25 }, load:()=>loadPack('medieval', 'medieval', medievalGroup, { lift:1.15, blocks:{ col:[212,196,168], tol:0.06, size:[0.62,0.30] }, areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6, c:[-0.25,-0.26], r:4.4, col:[176,190,118], skirt:{ cols:[[124,90,64],[176,190,118]], tol:0.16, wall:[124,90,64], slope:0, amp:0.10 }, foot:{ stone:[132,104,84], nStones:40, sStone:0.09, bush:[86,118,58], nBushes:70, sBush:0.11 } }, stones:{ n:80, s:0.06, col:[132,104,84], on:[176,190,118] }, bushes:{ n:300, s:0.10, col:[86,118,58], on:[176,190,118] }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
-  castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:2.0, strokeK:0.55, coarseMin:0.4, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6, lift:1.15, around:true}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
+  castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, pitchMax:1.05,   // (from above it has no sky under it: bare paper)
+            target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:2.0, strokeK:0.55, coarseMin:0.4, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6, lift:1.15, around:true}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
 };
 const CFG = {};
 // the sun is set as a painter sets up the subject: from the front-left of its OPENING view, high (three-quarter light),
@@ -3289,7 +3294,7 @@ peek.addEventListener('keyup', e=>{ if(e.key===' '||e.key==='Enter'){ peekOn(fal
 const view = { yaw:0.30, pitch:0.36, zoom:1, vyaw:0, vpitch:0 };
 // camera limits: a model may narrow them in MODELS (pitchMin/pitchMax/zoomMin/zoomMax: the Hill Castle, so the view never
 // looks into the hollow of its cut-out mountain)
-const LIM = { pitchMin:0.10, pitchMax:1.15, zoomMin:0.62, zoomMax:1.7 };
+const LIM = { pitchMin:0.10, pitchMax:1.40, zoomMin:0.45, zoomMax:2.0 };   // (user: more zoom and more angles; 1.40 ≈ 80°, nearly from above)
 const lim = k => (MODELS[current] && MODELS[current][k] !== undefined) ? MODELS[current][k] : LIM[k];
 const clampPitch = p => Math.min(lim('pitchMax'), Math.max(lim('pitchMin'), p)), clampZoom = z => Math.min(lim('zoomMax'), Math.max(lim('zoomMin'), z));
 let touched=false, dirty=true;
@@ -3327,7 +3332,7 @@ function releaseSpeed(p, t){
   let a = h[0]; for(const q of h) if(b.t - q.t <= 100){ a = q; break; }
   const span = (b.t - a.t)/1000; if(span < 0.025) return [0,0];
   const vyaw = -(b.x-a.x)*0.0072/span, vpitch = (b.y-a.y)*0.0052/span;
-  return [Math.max(-2.2, Math.min(2.2, vyaw)), Math.max(-1.0, Math.min(1.0, vpitch))];
+  return [Math.max(-4.5, Math.min(4.5, vyaw)), Math.max(-1.0, Math.min(1.0, vpitch))];
 }
 const endPtr = e=>{
   const p = pointers.get(e.pointerId);
@@ -3489,6 +3494,8 @@ function render(dt){
 
 // the coast slows by drag (∝ speed) plus a little friction, so it stops in finite time: from 1.5 rad/s in ~0.5 s
 function coastStep(v, dt){ const m = Math.max(0, Math.abs(v)*Math.exp(-5*dt) - 0.8*dt); return m < 0.01 ? 0 : Math.sign(v)*m; }
+// (a flick SPINS it (user): the turn keeps going for ~2 s and slows evenly to a stop; the tilt still stops at once)
+function spinStep(v, dt){ const m = Math.max(0, Math.abs(v)*Math.exp(-1.1*dt) - 0.25*dt); return m < 0.01 ? 0 : Math.sign(v)*m; }
 let gpuFences = [], fenceT = 0, drawnN = 0;
 let last = performance.now(), emaDt = 16, slowFrames = 0, born = last, animUntil = 0;
 function frame(now){
@@ -3507,7 +3514,7 @@ function frame(now){
   if(pointers.size===0){
     if(view.vyaw!==0 || view.vpitch!==0){
       view.yaw += view.vyaw*dt; view.pitch = clampPitch(view.pitch+view.vpitch*dt);
-      view.vyaw = coastStep(view.vyaw, dt); view.vpitch = coastStep(view.vpitch, dt); dirty = true;
+      view.vyaw = spinStep(view.vyaw, dt); view.vpitch = coastStep(view.vpitch, dt); dirty = true;
     }
   }
   if(showRaw!==showRawTarget){ showRaw += (showRawTarget-showRaw)*0.3; if(Math.abs(showRawTarget-showRaw)<0.003) showRaw=showRawTarget; dirty = true; }
