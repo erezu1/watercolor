@@ -3714,6 +3714,7 @@ function arrived(){ if(!hint.classList.contains('welcome')) return; hint.classLi
 canvas.addEventListener('pointerdown', e=>{
   canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY,h:[{t:e.timeStamp,x:e.clientX,y:e.clientY}]}); touch();
   view.vyaw=0; view.vpitch=0; if(pointers.size===1) pinched=false;
+  if(pointers.size===2) zoomTo = null;   // (a pinch takes over from a double-tap glide)
   if(pointers.size===2){ const [a,b]=[...pointers.values()]; pinch0=Math.hypot(a.x-b.x,a.y-b.y); zoom0=view.zoom; pinched=true; }
 });
 canvas.addEventListener('pointermove', e=>{
@@ -3741,8 +3742,21 @@ function releaseSpeed(p, t){
   const vyaw = -(b.x-a.x)*0.0072/span, vpitch = (b.y-a.y)*0.0052/span;
   return [Math.max(-4.5, Math.min(4.5, vyaw)), Math.max(-1.0, Math.min(1.0, vpitch))];
 }
+// DOUBLE TAP ZOOMS (user): a second quick tap near the first zooms in; on a view already zoomed in, back to the usual
+// distance. The zoom glides there (zoomTo, eased in frame()).
+let lastTap = null, zoomTo = null;
 const endPtr = e=>{
   const p = pointers.get(e.pointerId);
+  if(p && e.type === 'pointerup' && pointers.size === 1 && !pinched && p.h && p.h.length){
+    const f = p.h[0], moved = Math.hypot(e.clientX - f.x, e.clientY - f.y);
+    if(moved < 12 && e.timeStamp - f.t < 300){
+      if(lastTap && e.timeStamp - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40){
+        zoomTo = view.zoom > 0.92*lim('zoomMax') || view.zoom > 0.85 ? clampZoom(view.zoom*0.55) : clampZoom(1);
+        if(view.zoom < 0.85) zoomTo = clampZoom(1);
+        lastTap = null; view.vyaw = 0; view.vpitch = 0; dirty = true;
+      } else lastTap = { t:e.timeStamp, x:e.clientX, y:e.clientY };
+    } else lastTap = null;
+  }
   if(p && pointers.size===1 && !pinched && e.type==='pointerup'){ const [vy, vp] = releaseSpeed(p, e.timeStamp); view.vyaw = vy; view.vpitch = vp; }
   pointers.delete(e.pointerId); if(pointers.size<2) pinch0=0;
   if(pointers.size===1) for(const q of pointers.values()) q.h = [];   // (after a pinch: no coast from the second finger)
@@ -3946,6 +3960,7 @@ function frame(now){
       view.vyaw = spinStep(view.vyaw, dt); view.vpitch = coastStep(view.vpitch, dt); dirty = true;
     }
   }
+  if(zoomTo !== null){ view.zoom += (zoomTo - view.zoom)*(1 - Math.exp(-dt*9)); if(Math.abs(zoomTo - view.zoom) < 0.003){ view.zoom = zoomTo; zoomTo = null; } dirty = true; }
   if(showRaw!==showRawTarget){ showRaw += (showRawTarget-showRaw)*0.3; if(Math.abs(showRawTarget-showRaw)<0.003) showRaw=showRawTarget; dirty = true; }
   if(dirty) animUntil = now + 1300;                     // the strokes need a moment to finish growing / drying
   if(now > animUntil) return;                            // nothing changing: the painting stays as it is
