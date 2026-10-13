@@ -2489,6 +2489,15 @@ uniform vec2 uResI; uniform float uKi, uSolo, uWetOn, uDR, uDtR, uResetR, uGranK
 layout(location=0) out highp vec4 oAbs;   // the painting (absorbance)
 layout(location=1) out highp vec4 oE;     // how far the blending has got (kept from frame to frame)
 ${FS_COMMON}
+uniform sampler2D tThinDR; uniform sampler2D tThinCR; uniform sampler2D tRawR;
+float gEdgeK = 1.0;   // (no pigment collects at a border that is a reserved light: the paper left for a ladder, a frame)
+float resR(vec2 q){
+  vec4 tD = texture2D(tThinDR, q); if(tD.a < 0.5) return 0.0;
+  vec4 mD = texture2D(tDataR, q); if(mD.a > 0.5 && tD.b > mD.b + 0.002) return 0.0;
+  vec4 tC = texture2D(tThinCR, q), mC = texture2D(tRawR, q);
+  vec3 cm = mD.a > 0.5 ? mC.rgb : vec3(0.85), r3 = max((tC.rgb + 0.04)/(cm + 0.04), (tC.rgb*(0.35+0.65*tC.a) + 0.03)/((mD.a > 0.5 ? mC.rgb*(0.35+0.65*mC.a) : vec3(0.85)) + 0.03));
+  return smoothstep(1.15, 1.45, max(r3.r, max(r3.g, r3.b)));
+}
 float covAt(sampler2D t, vec2 uv, float lo, float hi, float nz){ return smoothstep(lo, hi, texture2D(t,uv).a + nz); }
 // one dried wash: the mean pigment of the strokes that made it, over the area they wetted, darker at its border
 vec3 wash(sampler2D t, float lo, float hi, float nz, float kEdge, float rad){
@@ -2499,7 +2508,7 @@ vec3 wash(sampler2D t, float lo, float hi, float nz, float kEdge, float rad){
   float ring = covAt(t, vUv+vec2(px.x,0.0), lo,hi,nz) + covAt(t, vUv-vec2(px.x,0.0), lo,hi,nz)
              + covAt(t, vUv+vec2(0.0,px.y), lo,hi,nz) + covAt(t, vUv-vec2(0.0,px.y), lo,hi,nz);
   float edge = clamp(c - ring*0.25, 0.0, 1.0);
-  return g.rgb/max(g.a,1e-3)*c*(1.0 + kEdge*edge);
+  return g.rgb/max(g.a,1e-3)*c*(1.0 + gEdgeK*kEdge*edge);
 }
 // a wash painted wet in wet: inside one object its shades have blended and its edge is soft (no pigment collects there);
 // where it meets another object (or a cast shadow edge) it is the ordinary crisp, ragged, edge-darkened wash
@@ -2514,7 +2523,7 @@ vec3 wetWash(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz, 
              + covAt(t, vUv+vec2(0.0,px.y), lo,hi,nz) + covAt(t, vUv-vec2(0.0,px.y), lo,hi,nz);
   float edge = clamp(cH - ring*0.25, 0.0, 1.0)*(1.0-wet);
   vec3 pig = mix(g.rgb/max(g.a,1e-3), b.rgb/max(b.a,1e-3), wet*step(1e-3, b.a));
-  return pig*c*(1.0 + kEdge*edge);
+  return pig*c*(1.0 + gEdgeK*kEdge*edge);
 }
 // (speed) the dry (wetOn 0) and the wet version of one wash share their taps
 void wetWash2(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz, float kEdge, float rad, float wetOn, out vec3 dry, out vec3 wetR){
@@ -2529,8 +2538,8 @@ void wetWash2(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz,
              + covAt(t, vUv+vec2(0.0,px.y), lo,hi,nz) + covAt(t, vUv-vec2(0.0,px.y), lo,hi,nz);
   float edge0 = clamp(cH - ring*0.25, 0.0, 1.0);
   vec3 pigD = g.rgb/max(g.a,1e-3);
-  if(cH >= 0.003) dry = pigD*cH*(1.0 + kEdge*edge0);
-  if(c >= 0.003) wetR = mix(pigD, b.rgb/max(b.a,1e-3), wet*step(1e-3, b.a))*c*(1.0 + kEdge*edge0*(1.0-wet));
+  if(cH >= 0.003) dry = pigD*cH*(1.0 + gEdgeK*kEdge*edge0);
+  if(c >= 0.003) wetR = mix(pigD, b.rgb/max(b.a,1e-3), wet*step(1e-3, b.a))*c*(1.0 + gEdgeK*kEdge*edge0*(1.0-wet));
 }
 void main(){
   vec2 pp = gl_FragCoord.xy/uKi;
@@ -2568,6 +2577,10 @@ void main(){
   float shapeEdge = border*(0.55 + 0.9*behind)*(0.8 + 0.4*vn(pp*0.2));
   // the blending is a process in time: fresh paint shows as it was put down, then merges with its neighbours (by the
   // same rules) over a fraction of a second. E is how much blending has happened so far.
+  float rvC = resR(vUv);
+  { vec2 pr = 4.0*uKi/uResI; float rv = rvC;
+    rv = max(rv, max(max(resR(vUv + vec2(pr.x,0.0)), resR(vUv - vec2(pr.x,0.0))), max(resR(vUv + vec2(0.0,pr.y)), resR(vUv - vec2(0.0,pr.y)))));
+    gEdgeK = 1.0 - rv; }
   vec3 A1d, A2d, A1w, A2w;
   if(uResDead > 0.5){ wetWash2(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, uWetOn, A1d, A1w); wetWash2(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, uWetOn, A2d, A2w); }
   else {
@@ -2586,8 +2599,9 @@ void main(){
   float fresh = uResetR > 0.5 ? 0.0 : max(Ep.a*exp(-uDtR/0.18), smoothstep(0.06, 0.16, rawNow - rawPrev)*(1.0 - smoothstep(0.05, 0.20, rawPrev)));
   vec3 E = ((A1w + A2w) - (A1d + A2d))*(1.0 - fresh);
   oE = vec4(E, fresh);
-  vec3 A1 = A1d + E, A2 = A2d;
+  vec3 A1 = (A1d + E)*(1.0 - rvC), A2 = A2d*(1.0 - rvC);   // (no wall colour inside a reserved light: brown over the blue that crept in went black — the ladder)
   vec3 A3 = wash(tG3, 0.17, 0.33, nz, 0.50, 2.5);
+  { float c3 = smoothstep(0.17, 0.33, texture2D(tG3, vUv).a)*(1.0 - gEdgeK); A1 *= 1.0 - c3; A2 *= 1.0 - c3; }   // (at a reserved light's edge its own paint (the ladder) and the wall's never stack: brown over blue is black)
   if(uSolo > 4.5 && uSolo < 5.5){ oAbs = vec4(vec3(1.0-wf.r, 1.0-wf.g, 1.0)*1.5, rawNow); return; }   // debug: where the paint is wet
   if(uSolo > 5.5){ oAbs = vec4(vec3(0.0, behind*2.0, border*2.0), rawNow); return; }   // debug: shape borders (blue) and cut-in (green)
 
@@ -2723,7 +2737,7 @@ const wetMat = new THREE.ShaderMaterial({
 const wetScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), wetMat); q.frustumCulled=false; wetScene.add(q); }
 const resolveMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
-  uniforms:{ tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1}, uResDead:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
+  uniforms:{ tThinDR:{value:null}, tThinCR:{value:null}, tRawR:{value:null}, tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1}, uResDead:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
   vertexShader:QUAD_VS, fragmentShader:RESOLVE_FS, depthTest:false, depthWrite:false
 });
 const finalMat = new THREE.ShaderMaterial({
@@ -3606,6 +3620,7 @@ function fit(){
   const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtShapeM.texture; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.tThinC.value=rtThin.texture[0]; P.tThinD.value=rtThin.texture[1]; P.tG0p.value=rtGlaze[0].texture; P.tG1p.value=rtGlaze[1].texture; P.tG2p.value=rtGlaze[2].texture; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
   strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtShapeM.texture; strokeMat.uniforms.tRawS.value = rtMain.texture[0]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1]; strokeMat.uniforms.tLineS.value = rtMain.texture[2];
   const Rz = resolveMat.uniforms; [0,1,2,3].forEach(i=>{ Rz['tG'+i].value = rtGlaze[i].texture; }); Rz.uResI.value.set(W,H); Rz.uKi.value = Math.min(W,H)/700;
+  Rz.tThinDR.value = rtThin.texture[1]; Rz.tThinCR.value = rtThin.texture[0]; Rz.tRawR.value = rtMain.texture[0];
   Rz.tShapeR.value = rtMain.texture[3]; Rz.tColorR.value = rtLit.texture; Rz.tDataR.value = rtMain.texture[1]; Rz.tW1.value = rtWet[1].texture[0]; Rz.tW2.value = rtWet[1].texture[1]; Rz.tWF.value = rtWet[1].texture[2];
   wetMat.uniforms.tColor.value = rtLit.texture; wetMat.uniforms.tData.value = rtMain.texture[1]; wetMat.uniforms.tShape.value = rtShapeM.texture; wetMat.uniforms.tRawW.value = rtMain.texture[0]; wetMat.uniforms.tThinC.value = rtThin.texture[0]; wetMat.uniforms.tThinD.value = rtThin.texture[1];
   const F = finalMat.uniforms;
