@@ -2342,7 +2342,7 @@ const QUAD_VS = `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(positio
 const AO_FS = `
 precision highp float;
 varying vec2 vUv;
-uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShapeA; uniform vec2 uResI; uniform float uKi, uDR, uFocal;
+uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShapeA; uniform vec2 uResI; uniform float uKi, uDR, uFocal, uSoftR;
 float zAt(vec2 q){ vec4 d = texture2D(tData, q); return (d.a > 0.5 && texture2D(tShapeA, q).z >= 0.25) ? d.b*uDR : -1.0; }   // (not on grass blades: the ground's slope was read off the blades)
 void main(){
   vec4 c = texture2D(tColor, vUv), d = texture2D(tData, vUv);
@@ -2369,9 +2369,12 @@ void main(){
   // a steady picture to paint from: the colour is softened WITHIN each shape (same piece, same depth), so a texture's
   // fine detail does not shimmer when the view moves by a fraction of a pixel; borders between shapes stay sharp
   vec4 e0 = texture2D(tShapeA, vUv); vec3 cs = c.rgb; float ws = 1.0;
-  float Rb = 2.6*uKi;
-  for(int i=0;i<10;i++){
-    float a = float(i)*2.3999632 + 0.5, r = Rb*sqrt((float(i)+0.5)/10.0);
+  // (and AT THE BRUSH'S SCALE, user: "when the faces are so small they should be treated as one": colour that changes
+  // within less than a brush is averaged into what the brush paints, inside its (merged) shape, so a stroke is not
+  // stopped at every little patch; larger shapes keep their own colour and their border)
+  float Rb = max(2.6*uKi, uSoftR);
+  for(int i=0;i<16;i++){
+    float a = float(i)*2.3999632 + 0.5, r = Rb*sqrt((float(i)+0.5)/16.0);
     vec2 q = vUv + vec2(cos(a), sin(a))*r*px;
     vec4 eq = texture2D(tShapeA, q); vec4 dq = texture2D(tData, q);
     float w = dq.a*(1.0 - step(7e-4, abs(eq.z-e0.z) + abs(eq.w-e0.w)))*(1.0 - smoothstep(0.05, 0.25, abs(dq.b*uDR - z0)));
@@ -2659,10 +2662,43 @@ void main(){
 }`;
 
 const aoMat = new THREE.ShaderMaterial({
-  uniforms:{ tColor:{value:null}, tData:{value:null}, tShapeA:{value:null}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uDR:SHARED.uDepthRange, uFocal:{value:500} },
+  uniforms:{ tColor:{value:null}, tData:{value:null}, tShapeA:{value:null}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uDR:SHARED.uDepthRange, uFocal:{value:500}, uSoftR:{value:0} },
   vertexShader:QUAD_VS, fragmentShader:AO_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending
 });
 const aoScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), aoMat); q.frustumCulled=false; aoScene.add(q); }
+// SMALL PIECES ARE PART OF WHAT SURROUNDS THEM (user: "where there are too many small faces each gets its own stroke —
+// when they are so small they should be treated as one"): a piece that covers only a small part of a brush-sized disc
+// around a pixel is, for the painting, the shape that dominates that disc (at about the same depth). Strokes then run
+// across a wall of little windows and battlements, and stop only at borders a brush would respect. The disc is the
+// brush's own size on the paper, so a piece that grows as the view comes nearer is its own shape again.
+const MERGE_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D tShapeM; uniform sampler2D tDataM; uniform vec2 uResI; uniform float uR, uT, uDR, uNrm;
+void main(){
+  vec4 e0 = texture2D(tShapeM, vUv), d0 = texture2D(tDataM, vUv);
+  gl_FragColor = e0;
+  if(uT <= 0.0 || e0.z < 0.25 || d0.a < 0.5) return;
+  float z0 = d0.b*uDR, tolZ = 0.35*clamp(z0/13.0, 0.7, 3.0);
+  vec2 ids[24]; vec2 nrs[24]; float ok[24]; float own = 0.0, n = 0.0;
+  for(int i=0;i<24;i++){
+    float a = float(i)*2.3999632, r = uR*sqrt((float(i)+0.5)/24.0);
+    vec2 q = vUv + vec2(cos(a), sin(a))*r/uResI;
+    vec4 e = texture2D(tShapeM, q), d = texture2D(tDataM, q);
+    float v = (e.z >= 0.25 && d.a > 0.5 && abs(d.b*uDR - z0) < tolZ) ? 1.0 : 0.0;
+    ids[i] = e.zw; nrs[i] = e.xy; ok[i] = v; n += v;
+    own += v*(1.0 - step(7e-4, abs(e.z-e0.z) + abs(e.w-e0.w)));
+  }
+  if(n < 6.0 || own/n >= uT) return;                     // (a piece big enough for the brush keeps its own border)
+  float best = 0.0; vec2 bid = e0.zw, bnr = e0.xy;
+  for(int i=0;i<24;i++){ if(ok[i] < 0.5) continue; float c = 0.0;
+    for(int j=0;j<24;j++) c += ok[j]*(1.0 - step(7e-4, abs(ids[j].x-ids[i].x) + abs(ids[j].y-ids[i].y)));
+    if(c > best){ best = c; bid = ids[i]; bnr = nrs[i]; } }
+  if(best >= 0.45*n) gl_FragColor = vec4(uNrm > 0.5 ? bnr : e0.xy, bid);   // (only into a clearly dominant neighbour, and with its normal: a small facet is no crease)
+}`;
+const mergeMat = new THREE.ShaderMaterial({ uniforms:{ tShapeM:{value:null}, tDataM:{value:null}, uResI:{value:new THREE.Vector2(1,1)}, uR:{value:10}, uT:{value:0.30}, uNrm:{value:1}, uDR:SHARED.uDepthRange },
+  vertexShader:QUAD_VS, fragmentShader:MERGE_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending });
+const mergeScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), mergeMat); q.frustumCulled=false; mergeScene.add(q); }
 const wetMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
   uniforms:{ tA:{value:null}, tB:{value:null}, tF:{value:null}, tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tThinC:{value:null}, tThinD:{value:null}, uStep:{value:new THREE.Vector2()}, uDR:SHARED.uDepthRange, uFirst:{value:1}, uWetEarly:{value:1}, uWetRel:{value:1}, uPaintStop:{value:1} },
@@ -3308,7 +3344,7 @@ async function setScene(name){
   Object.keys(MODELS).forEach(k=>{ MODELS[k].root().visible = k===name; });
   Object.keys(strokeMeshes).forEach(k=>{ strokeMeshes[k].meshes.forEach(x=>{ x.visible = (k===name); }); strokeMeshes[k].points.visible = (k===name); });
   const P = planMat.uniforms;
-  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1; P.uSkyAll.value = c.skyAll ? 1 : 0; P.uCoarseMin.value = c.coarseMin || 0; P.uInkK.value = c.inkK || 1; P.uCoverC.value = c.coverC || 2.5;   // (inkK: a model painted with stronger paint; coverC: how closely its coarse strokes cover)
+  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1; P.uSkyAll.value = c.skyAll ? 1 : 0; P.uCoarseMin.value = OPT.coarseMin !== undefined ? OPT.coarseMin : (c.coarseMin || 0); P.uInkK.value = c.inkK || 1; P.uCoverC.value = c.coverC || 2.5;   // (inkK: a model painted with stronger paint; coverC: how closely its coarse strokes cover)
   P.uFadeR.value = c.fade ? c.fade.r*(c.fadeK || 1) : 0; if(c.fade){ P.uFadeC.value.copy(c.fade.c); P.uFadeY.value = c.fade.y; }
   setupShadow(c);
   view.yaw=c.yaw; view.pitch=clampPitch(c.pitch); view.zoom=clampZoom(1); view.vyaw=0; view.vpitch=0;
@@ -3523,7 +3559,7 @@ canvas.addEventListener('keydown', e=>{
 /* ------------------------------------------------------------------ */
 const camera = new THREE.PerspectiveCamera(30, 1, 1, 100);
 const rtOpts = { type:THREE.HalfFloatType, format:THREE.RGBAFormat, minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, depthBuffer:false, generateMipmaps:false };
-let Wf=0,Hf=0,W=0,H=0, rtMain=null, rtGlaze=null, rtRes=null, resCur=0, rtWet=null, rtLit=null, rtThin=null;
+let Wf=0,Hf=0,W=0,H=0, rtMain=null, rtGlaze=null, rtRes=null, resCur=0, rtWet=null, rtLit=null, rtThin=null, rtShapeM=null;
 // A PHONE starts at settings it can carry (measured on a phone: 30 fps settling, 20–30 dragging at 0.62 and all strokes;
 // the slow-frame guard then lowered the resolution mid-use, restarting the strokes — a visible hitch): a lower painting
 // resolution and ~3/4 of the strokes (faces that get too few strokes grow theirs to cover). ?scale= / ?q= override.
@@ -3538,22 +3574,24 @@ function fit(){
   if(wf===Wf && hf===Hf && w===W && h===H) return;
   Wf=wf; Hf=hf; W=w; H=h;
   renderer.setSize(Wf,Hf,false);
-  if(rtMain){ rtMain.dispose(); rtGlaze.forEach(r=>r.dispose()); rtRes.forEach(r=>r.dispose()); rtWet.forEach(r=>r.dispose()); rtLit.dispose(); rtThin.dispose(); }
+  if(rtMain){ rtMain.dispose(); rtGlaze.forEach(r=>r.dispose()); rtRes.forEach(r=>r.dispose()); rtWet.forEach(r=>r.dispose()); rtLit.dispose(); rtThin.dispose(); rtShapeM.dispose(); }
   rtMain = new THREE.WebGLMultipleRenderTargets(W,H,4,Object.assign({},rtOpts,{depthBuffer:true}));
   [1,3].forEach(i=>{ rtMain.texture[i].minFilter = rtMain.texture[i].magFilter = THREE.NearestFilter; });   // depth and shape ids must never be blended
   rtGlaze = [0,1,2,3].map(()=>new THREE.WebGLRenderTarget(W,H,rtOpts));   // one wash buffer per glaze
   rtRes = [0,1].map(()=>new THREE.WebGLMultipleRenderTargets(W,H,2,rtOpts)); // the painting (absorbance) + the blending so far
   rtWet = [0,1].map(()=>new THREE.WebGLMultipleRenderTargets(W,H,3,rtOpts)); // wet in wet: across, then down
-  rtLit = new THREE.WebGLRenderTarget(W,H,rtOpts);                          // the reference colour + light, with occlusion
+  rtLit = new THREE.WebGLRenderTarget(W,H,rtOpts);
+  rtShapeM = new THREE.WebGLRenderTarget(W,H,rtOpts); rtShapeM.texture.minFilter = rtShapeM.texture.magFilter = THREE.NearestFilter;   // (shapes with the small pieces merged)
+  mergeMat.uniforms.tShapeM.value = rtMain.texture[3]; mergeMat.uniforms.tDataM.value = rtMain.texture[1]; mergeMat.uniforms.uResI.value.set(W,H);                          // the reference colour + light, with occlusion
   rtThin = new THREE.WebGLMultipleRenderTargets(W,H,2,Object.assign({},rtOpts,{depthBuffer:true}));   // the thin things alone: colour + light, data (depth)
   rtThin.texture[1].minFilter = rtThin.texture[1].magFilter = THREE.NearestFilter;
-  aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.tShapeA.value = rtMain.texture[3]; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
+  aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.tShapeA.value = rtShapeM.texture; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
   camera.aspect = W/H; camera.updateProjectionMatrix();
-  const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtMain.texture[3]; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.tThinC.value=rtThin.texture[0]; P.tThinD.value=rtThin.texture[1]; P.tG0p.value=rtGlaze[0].texture; P.tG1p.value=rtGlaze[1].texture; P.tG2p.value=rtGlaze[2].texture; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
-  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtMain.texture[3]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1]; strokeMat.uniforms.tLineS.value = rtMain.texture[2];
+  const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtShapeM.texture; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.tThinC.value=rtThin.texture[0]; P.tThinD.value=rtThin.texture[1]; P.tG0p.value=rtGlaze[0].texture; P.tG1p.value=rtGlaze[1].texture; P.tG2p.value=rtGlaze[2].texture; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
+  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtShapeM.texture; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1]; strokeMat.uniforms.tLineS.value = rtMain.texture[2];
   const Rz = resolveMat.uniforms; [0,1,2,3].forEach(i=>{ Rz['tG'+i].value = rtGlaze[i].texture; }); Rz.uResI.value.set(W,H); Rz.uKi.value = Math.min(W,H)/700;
   Rz.tShapeR.value = rtMain.texture[3]; Rz.tColorR.value = rtLit.texture; Rz.tDataR.value = rtMain.texture[1]; Rz.tW1.value = rtWet[1].texture[0]; Rz.tW2.value = rtWet[1].texture[1]; Rz.tWF.value = rtWet[1].texture[2];
-  wetMat.uniforms.tColor.value = rtLit.texture; wetMat.uniforms.tData.value = rtMain.texture[1]; wetMat.uniforms.tShape.value = rtMain.texture[3]; wetMat.uniforms.tThinC.value = rtThin.texture[0]; wetMat.uniforms.tThinD.value = rtThin.texture[1];
+  wetMat.uniforms.tColor.value = rtLit.texture; wetMat.uniforms.tData.value = rtMain.texture[1]; wetMat.uniforms.tShape.value = rtShapeM.texture; wetMat.uniforms.tThinC.value = rtThin.texture[0]; wetMat.uniforms.tThinD.value = rtThin.texture[1];
   const F = finalMat.uniforms;
   F.tShapeF.value=rtMain.texture[3]; F.tLitF.value=rtLit.texture; F.tThinCF.value=rtThin.texture[0]; F.tThinDF.value=rtThin.texture[1]; F.tColor.value=rtMain.texture[0]; F.tData.value=rtMain.texture[1]; F.tLine.value=rtMain.texture[2];
   resetStrokes = true;
@@ -3613,6 +3651,10 @@ function render(dt){
 
   if(__sync) __sync('thin');
   aoMat.uniforms.uFocal.value = H*0.5/t;
+  { const M = mergeMat.uniforms; M.uT.value = OPT.merge === 0 ? 0 : (OPT.mergeT || 0.30); M.uNrm.value = OPT.mergeN === 0 ? 0 : 1;
+    M.uR.value = (OPT.mergeR || 0.6)*19.0*P.uK.value*P.uSizeK.value*Math.pow(base/dist, 0.45);   // (the colour brush's base size, as the planner has it)
+    renderer.setRenderTarget(rtShapeM); renderer.render(mergeScene, postCam);
+    aoMat.uniforms.uSoftR.value = (OPT.colK !== undefined ? OPT.colK : 2.0)*M.uR.value/(OPT.mergeR || 0.6); }
   renderer.setRenderTarget(rtLit); renderer.render(aoScene, postCam);
   if(__sync) __sync('ao');
   // 2. the planner: every stroke works out the brush mark that fits its part of the picture
