@@ -1181,7 +1181,7 @@ const PLAN_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape; uniform sampler2D tLine; uniform sampler2D tRaw; uniform sampler2D tThinC; uniform sampler2D tThinD;
 uniform vec3 uRockCol; uniform float uRockK;
-uniform float uShadowOwn;
+uniform float uShadowOwn, uLineAll;
 uniform float uJit, uCutK, uHtK, uRoundK, uLineMax, uResvT, uSunK, uSunLo, uInkK, uCoverC, uBoardT;
 uniform vec2 uRes; uniform float uGrowMax, uCoarseMin, uCoarseSz, uToneK, uCoarseK, uCover1, uCoverG; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
 uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR, uEarly;   // (uShadeK: how strongly light and shade are told apart)
@@ -1461,6 +1461,9 @@ void main(){
           // so it fills it — drawn at its own width it left white slivers beside it and went dark where it missed: the ladder)
           hw = hw*1.6 + 1.5*uK; ramp = vec4(1.0, 1.0, 0.0, 2.0); }
         if(uFadeR > 0.0 && vPos.y <= uFadeY) amount *= 1.0 - smoothstep(0.70, 1.0, length(vPos.xz - uFadeC)/uFadeR);
+        // (a model whose thin things are ALWAYS drawn — whiskers, user: "clear thin objects, always a stroke"): where the
+        // line is no darker than what is behind it (white on white fur) it is drawn as a soft grey of its own colour
+        if(uLineAll > 0.5 && amount < 0.5){ vec3 o3 = lw > 0.5 ? lcm/lw : own; col = harmonise(-log(clamp(o3*0.72, 0.03, 1.0)))/0.9 + uShadow*0.25; amount = 0.8*uCables; }
       }  // a rod, a rib, a pole: its OWN colour; its light and shade come from the profile
     }
   } else {
@@ -2091,7 +2094,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uQK:{value:1}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uShadowOwn:{value:0}, uRockCol:{value:new THREE.Vector3(0.5,0.35,0.25)}, uRockK:{value:0}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
+    uQK:{value:1}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uShadowOwn:{value:0}, uLineAll:{value:0}, uRockCol:{value:new THREE.Vector3(0.5,0.35,0.25)}, uRockK:{value:0}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()}, uSkyAll:{value:0},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -3498,7 +3501,7 @@ const MODELS = {
   moomin:  { root:()=>moominGroup, yaw:0.70, pitch:0.38, fit:0.88, shadeK:1.3, load:()=>loadPack('moomin', 'moomin_house', moominGroup, { ground:true, lift:1.4, planks:{ col:[50,80,120], tol:0.30, w:0.30, paint:[58,92,138] } }) },
   bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup, { plate:{ col:[230,169,118], base:[97,63,41], r:5.6 } }) },
   cats:    { root:()=>catsGroup, fade:{ c:new THREE.Vector2(0,0), r:9.5, y:-2.0 },   // (the meadow fades into the paper at its edge)
-            yaw:0.10, pitch:0.26, fit:0.36, shadeK:1.0, marks:1.0, colK:0.6, coarseMin:0, coarseK:0, shadowOwn:0.75,   // (soft round animals: painted wet, shade in their own colour)   // (its fur patches are its pattern: kept, not averaged away)
+            yaw:0.10, pitch:0.26, fit:0.36, shadeK:1.0, marks:1.0, colK:0.6, coarseMin:0, coarseK:0, shadowOwn:0.75, lineAll:1,   // (soft round animals: painted wet, shade in their own colour)   // (its fur patches are its pattern: kept, not averaged away)
             load:()=>loadPack('cats', 'cats', catsGroup, { skyK:1.6, features:{ whisker:1.8, maxLen:1.5, eyeMax:0.25 }, ground:{ y:-2.19, c:[0,0], r:11, col:[150,172,108], grass:0.9 }, groundBushes:{ n:46, s:0.55, col:[88,122,62], on:[150,172,108], avoid:{ c:[0,0], r:5.2 }, within:{ c:[0,0], r:7.6 } } }) },
   medieval:{ root:()=>medievalGroup, target:new THREE.Vector3(-0.25,1.30,-0.20), halfW:2.3, halfH:2.0, yaw:0.35, pitch:0.90, shadeK:1.4, strokeK:0.55, shadowHalf:4.2, shadowCenter:new THREE.Vector3(-0.25,0.4,-0.25),   // (the shadow map on the hill and castle, not the painted ground round it: 2x finer, no blocky shade)
                // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
@@ -3528,7 +3531,7 @@ async function setScene(name){
   Object.keys(MODELS).forEach(k=>{ MODELS[k].root().visible = k===name; });
   Object.keys(strokeMeshes).forEach(k=>{ strokeMeshes[k].meshes.forEach(x=>{ x.visible = (k===name); }); strokeMeshes[k].points.visible = (k===name); });
   const P = planMat.uniforms;
-  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1; P.uSkyAll.value = c.skyAll ? 1 : 0; P.uCoarseMin.value = OPT.coarseMin !== undefined ? OPT.coarseMin : (c.coarseMin || 0); P.uInkK.value = c.inkK || 1; P.uShadowOwn.value = c.shadowOwn || 0; P.uCoarseK.value = c.coarseK !== undefined ? c.coarseK : 1; wetMat.uniforms.uPaintStop.value = P.uCoarseK.value > 0 ? 1 : 0; resolveMat.uniforms.uMarks.value = OPT.marks !== undefined ? OPT.marks : (c.marks || 0); P.uRockK.value = c.rock ? (OPT.rockK !== undefined ? OPT.rockK : 0.55) : 0; if(c.rock) P.uRockCol.value.set(...c.rock.map(v=>Math.pow(v/255, 2.2)));   // (linear, as the reference) P.uCoverC.value = c.coverC || 2.5;   // (inkK: a model painted with stronger paint; coverC: how closely its coarse strokes cover)
+  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1; P.uSkyAll.value = c.skyAll ? 1 : 0; P.uCoarseMin.value = OPT.coarseMin !== undefined ? OPT.coarseMin : (c.coarseMin || 0); P.uInkK.value = c.inkK || 1; P.uShadowOwn.value = c.shadowOwn || 0; P.uLineAll.value = c.lineAll ? 1 : 0; P.uCoarseK.value = c.coarseK !== undefined ? c.coarseK : 1; wetMat.uniforms.uPaintStop.value = P.uCoarseK.value > 0 ? 1 : 0; resolveMat.uniforms.uMarks.value = OPT.marks !== undefined ? OPT.marks : (c.marks || 0); P.uRockK.value = c.rock ? (OPT.rockK !== undefined ? OPT.rockK : 0.55) : 0; if(c.rock) P.uRockCol.value.set(...c.rock.map(v=>Math.pow(v/255, 2.2)));   // (linear, as the reference) P.uCoverC.value = c.coverC || 2.5;   // (inkK: a model painted with stronger paint; coverC: how closely its coarse strokes cover)
   P.uFadeR.value = c.fade ? c.fade.r*(c.fadeK || 1) : 0; if(c.fade){ P.uFadeC.value.copy(c.fade.c); P.uFadeY.value = c.fade.y; }
   setupShadow(c);
   view.yaw=c.yaw; view.pitch=clampPitch(c.pitch); view.zoom=clampZoom(1); view.vyaw=0; view.vpitch=0;
@@ -3825,7 +3828,7 @@ function render(dt){
   P.uCull.value = OPT.cull; P.uEarly.value = OPT.early; strokeMat.uniforms.uEarlyS.value = OPT.strokeEarly; wetMat.uniforms.uWetEarly.value = OPT.wetEarly; resolveMat.uniforms.uResDead.value = OPT.resolveDead;
   planFrame++;
   const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id,
-               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, PU.uQK.value, PU.uJit.value, PU.uCutK.value, PU.uHtK.value, PU.uRoundK.value, PU.uLineMax.value, PU.uResvT.value, PU.uSunK.value, PU.uSunLo.value, PU.uInkK.value, PU.uCoverC.value, PU.uShadowOwn.value, PU.uRockK.value, PU.uBoardT.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
+               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, PU.uQK.value, PU.uJit.value, PU.uCutK.value, PU.uHtK.value, PU.uRoundK.value, PU.uLineMax.value, PU.uResvT.value, PU.uSunK.value, PU.uSunLo.value, PU.uInkK.value, PU.uCoverC.value, PU.uShadowOwn.value, PU.uLineAll.value, PU.uRockK.value, PU.uBoardT.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
   const replan = !OPT.skipPlan || key !== lastPlanKey; lastPlanKey = key;
   // (OPT.halfPlan: while the view moves, every other frame only the anchors are moved — see ANCH_FS)
   const light = replan && OPT.halfPlan && OPT.quad && lightRun < OPT.halfPlan && restT < 0.05 && !resetStrokes && !__sync;
