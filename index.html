@@ -998,7 +998,7 @@ void main(){
 const PLAN_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape; uniform sampler2D tLine; uniform sampler2D tRaw; uniform sampler2D tThinC; uniform sampler2D tThinD;
-uniform vec2 uRes; uniform float uScaleBlend, uGrowMax; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
+uniform vec2 uRes; uniform float uGrowMax; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
 uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR, uEarly;   // (uShadeK: how strongly light and shade are told apart)
 // PLANNED AGAINST THE PAPER (readability study): lines and darks are the last glaze; what the first three glazes have
 // already put down (last frame's buffers) is subtracted, so a dark is never counted twice (black bars on boards, dabs on
@@ -1086,7 +1086,6 @@ float simAt(vec4 c, vec4 d, vec4 e, vec3 g0, float s0, float z0, vec4 e0, float 
 // the brush goes out from the anchor and stops at the first border: another shape, a jump in depth, or a crease
 // may the brush go on to q? (not across another shape, a step in depth, or a crease)
 bool gNarrow = false;                                    // (a narrow form: its strokes go across its creases — a beam's faces are one stroke)
-float fineTex = 0.0;                                     // (colour varying finer than the brush here: blended)
 bool okAt(vec2 q, float zp, vec3 np, float st, vec3 g0, float s0, vec4 e0, float tol, float mode, out float z, out vec3 nq){
   vec4 d = texture2D(tData,q), e = texture2D(tShape,q); z = d.b*uDepthRange; nq = octDec(e.xy);
   float inShape = sameShape(e, e0)*hasShape(e);
@@ -1333,21 +1332,6 @@ void main(){
       if(early && nearEdge <= 0.15) NOT_WANTED            // (a fine dab paints only near an edge: amount *= smoothstep(0.15, 0.75, nearEdge))
     }
     float mode = layer<0.5 ? -1.0 : (layer>1.5 && layer<2.5) ? ((castHere || !bigShape) ? 1.0 : 2.0) : (layer>2.5 && layer<3.5) ? 0.5 : 0.0;
-    // COLOUR FINER THAN THE BRUSH IS BLENDED, COARSER IS KEPT (user: "each texture has a length scale at which it is
-    // smooth; given the zoom it decides how many strokes and how much blend"): on a ring a third of a brush out, on the
-    // same object, count how often the colour changes going round. An edge changes twice; patches smaller than the brush
-    // (the turtle's shell, coloured triangle by triangle) change back and forth — then the stroke runs across them and
-    // takes their mixed colour. Zoomed in, the same patches are bigger than the brush: their edges are kept.
-    if(uScaleBlend > 0.5 && layer < 2.5 && hasShape(e0) > 0.5 && vis > 0.02){
-      float nTr = 0.0, prev = -1.0, first = -1.0;
-      for(int i=0;i<8;i++){ vec2 q = uv + vec2(cos(float(i)*0.785398), sin(float(i)*0.785398))*0.35*sz/uRes;
-        vec4 eq = texture2D(tShape,q); float on = texture2D(tData,q).a*sameShape(eq, e0);
-        float dif = on > 0.5 ? step(tol*0.55, length(sqrt(texture2D(tColor,q).rgb)-g0)) : prev < 0.0 ? 0.0 : prev;
-        if(i == 0) first = dif; else nTr += abs(dif - prev); prev = dif; }
-      nTr += abs(first - prev);
-      fineTex = smoothstep(2.5, 4.5, nTr);
-      tol = mix(tol, max(tol, 0.40), fineTex);
-    }
     float reach = layer>2.5 ? max(sz*0.6, 4.5*uK) : sz*0.9;
     float h = reach/2.0;
     float W = 0.0; vec2 Wp = vec2(0.0); vec3 Wpp = vec3(0.0); vec3 Wc = vec3(0.0); float Ws = 0.0; float Wn = 0.0; vec2 Wno = vec2(0.0); float Bz = 0.0, Bw = 0.0, Ul = 0.0, Uw = 0.0, Nl = 0.0; vec2 Gl = vec2(0.0); float Gw = 0.0, Ps = 0.0, Pw = 0.0, Tz = 0.0, Tw = 0.0, Smx = -1.0;
@@ -1821,7 +1805,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uCamDist:{value:20}, uRefDist:{value:20}, uScaleBlend:{value:1}, uGrowMax:{value:3}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
+    uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()}, uSkyAll:{value:0},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -2812,11 +2796,12 @@ const MODELS = {
                fade:{ c:new THREE.Vector2(0.45,-0.1), r:5.9, y:-2.84 } },   // (a larger sea, fading out from just beyond the island)   // (more of its sea)   // (its own sea: faded in a ring round the island, not at the sea's far edges)
   moomin:  { root:()=>moominGroup, yaw:0.70, pitch:0.38, fit:0.88, shadeK:1.3, load:()=>loadPack('moomin', 'moomin_house', moominGroup, { ground:true, lift:1.4 }) },
   bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup, { plate:{ col:[230,169,118], base:[97,63,41], r:5.6 } }) },
-  medieval:{ root:()=>medievalGroup, target:new THREE.Vector3(-0.25,1.30,-0.20), halfW:2.3, halfH:2.0, yaw:0.35, pitch:0.90, shadeK:1.3, strokeK:0.55,   // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
+  medieval:{ root:()=>medievalGroup, target:new THREE.Vector3(-0.25,1.30,-0.20), halfW:2.3, halfH:2.0, yaw:0.35, pitch:0.90, shadeK:1.3, strokeK:0.55, shadowHalf:4.2, shadowCenter:new THREE.Vector3(-0.25,0.4,-0.25),   // (the shadow map on the hill and castle, not the painted ground round it: 2x finer, no blocky shade)
+               // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
             
              pitchMin:0.25,   // (its hill stands in a painted ground, so the camera may circle low; not lower than this: the ground's far edge)
              fade:{ c:new THREE.Vector2(-0.25,-0.26), r:5.0, y:1.25 }, load:()=>loadPack('medieval', 'medieval', medievalGroup, { areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6 }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
-  castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:1.0, strokeK:0.55, fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
+  castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:1.0, strokeK:0.55, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
 };
 const CFG = {};
 // the sun is set as a painter sets up the subject: from the front-left of its OPENING view, high (three-quarter light),
@@ -3111,7 +3096,7 @@ function render(dt){
   P.uCull.value = OPT.cull; P.uEarly.value = OPT.early; strokeMat.uniforms.uEarlyS.value = OPT.strokeEarly; wetMat.uniforms.uWetEarly.value = OPT.wetEarly; resolveMat.uniforms.uResDead.value = OPT.resolveDead;
   planFrame++;
   const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id,
-               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uScaleBlend.value, PU.uGrowMax.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? planFrame : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
+               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? planFrame : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
   const replan = !OPT.skipPlan || key !== lastPlanKey; lastPlanKey = key;
   if(replan){
   // 1. the 3D picture the painter looks at
@@ -3236,7 +3221,7 @@ window.__pavilion = { growMax:(v)=>{ planMat.uniforms.uGrowMax.value=v; resetStr
     const root = MODELS[current].root(); let tris = 0; root.traverse(o=>{ if(o.isMesh){ const g=o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count)/3; } });
     return { strokes:L, refPx:[w,h], modelCover:+(cov/(w*h)).toFixed(3), shapesVisible:sh.size, shapesBig:nBig, colourSpreadInShape:+(varW/Math.max(wsum,1)).toFixed(3),
              colourJumpsPer1000px:+(1000*jumps/Math.max(inside,1)).toFixed(1), tris, nShapes:root.userData.nShapes, cfg:cfgFor(current).detail, holes:+(holes/Math.max(cand,1)).toFixed(3), mottle:+(mot/Math.max(mw,1)).toFixed(3) };
-  }, scaleBlend:(v)=>{ planMat.uniforms.uScaleBlend.value=v; resetStrokes=true; dirty=true; }, pixShade:(v)=>{ strokeMat.uniforms.uPixShade.value=v; dirty=true; }, wetRel:(v)=>{ wetMat.uniforms.uWetRel.value=v; dirty=true; }, smallShape:(v)=>{ planMat.uniforms.uSmallShape.value=v; resetStrokes=true; dirty=true; }, paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+  }, pixShade:(v)=>{ strokeMat.uniforms.uPixShade.value=v; dirty=true; }, wetRel:(v)=>{ wetMat.uniforms.uWetRel.value=v; dirty=true; }, smallShape:(v)=>{ planMat.uniforms.uSmallShape.value=v; resetStrokes=true; dirty=true; }, paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
   passes:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4), f4=new Float32Array(4), acc={}; let t=0;
