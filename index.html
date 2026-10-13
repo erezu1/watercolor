@@ -771,7 +771,7 @@ function buildStrokes(root, countScale, skyN){
       tmp.copy(up).addScaledVector(nrm,-up.dot(nrm));       // vertical along the surface
       contour.crossVectors(nrm,up);                         // around the form
       if(Math.abs(nrm.y) > 0.8){ const a=rg()*6.283; tan.set(Math.cos(a),0,Math.sin(a)); }   // a floor or roof: any way across it
-      else { tan.copy(rr<0.6? tmp : contour); }                                                     // a wall: up it, or around the form
+      else { tan.copy(root.userData.around ? contour : (rr<0.6? tmp : contour)); }   // (around: one direction on every face — a painting that asks for calm, even strokes)                                                     // a wall: up it, or around the form
       { const pa = planeAxis[lo];                         // ... unless the face is clearly long and narrow (a stair riser, a column,
         if(pa && role !== 'line'){ tan.set(pa[0],pa[1],pa[2]); tan.addScaledVector(nrm, -tan.dot(nrm)); } }   // a frame): then along it
       if(tan.lengthSq()<1e-6) tan.set(1,0,0);
@@ -1410,7 +1410,7 @@ void main(){
       cE = uCoarseK*clamp(max(max(smoothstep(0.004, 0.025, Nv/max(Nw,1.0)), busy), uCoarseMin), 0.0, 1.0)*(narrowForm ? 0.0 : 1.0);   // (uCoarseMin: a painting whose whole texture is coarse)   // (texture alone on a smooth form is painted wet: the Moomin tower, the dome)
       sz *= mix(1.0, uCoarseSz, cE);
     }
-    float hlDef = sz*vInfo.w*0.5, hwDef = sz*0.5;
+    float hlDef = sz*vInfo.w*0.5*(1.0 + 0.9*cE), hwDef = sz*0.5*(1.0 - 0.35*cE);   // (small textured strokes are THIN and long, not dabs)
     // COVER THE FACE (redesign stage 2, docs/redesign.md): the strokes sown here are too few for this brush in THIS view
     // (zoomed in, or a broad face that got few anchors) — each one grows just enough that together they still cover it
     // with ~cover layers, up to uGrowMax its size; the trace keeps it inside its face. Where there are enough strokes
@@ -1434,7 +1434,7 @@ void main(){
     float curved = smoothstep(0.004, 0.012, length(gL)*h)*(mode > 1.5 ? 1.0 : 0.0);   // the modelling runs along the form
     if(curved > 0.0){ vec2 iso = normalize(vec2(-gL.y, gL.x)+vec2(1e-5,0.0)); dirT = mixDir(dirT, iso, curved); }
     dbgV.x = aniso*trust; dbgV.w = curved; dbgV.z = atan(dirTan.y, dirTan.x);
-    float ang = (rr.z-0.5)*(0.35+0.8*uLoose)*(1.0-0.6*aniso*trust);
+    float ang = (rr.z-0.5)*(0.35+0.8*uLoose)*(1.0-0.6*aniso*trust)*(1.0 - 0.7*cE);   // (small textured strokes: laid evenly)
     dirT = vec2(dirT.x*cos(ang)-dirT.y*sin(ang), dirT.x*sin(ang)+dirT.y*cos(ang));
     bool isSea = vInfo.y > 10.5 && vInfo.y < 11.5;
     if(isSea){ float aS = (rr.z-0.5)*0.10; dirT = vec2(cos(aS), sin(aS)); }   // water is painted with level strokes, whatever the view
@@ -1450,7 +1450,7 @@ void main(){
       for(int k=0;k<4;k++){ float a = float(k)*0.7853982; vec2 u = vec2(cos(a), sin(a)), o1 = u*r/uRes, o2 = 2.0*o1;
         float d = abs(lum3(texture2D(tRaw, uv + o1).rgb) - lum3(texture2D(tRaw, uv - o1).rgb)) + abs(lum3(texture2D(tRaw, uv + o2).rgb) - lum3(texture2D(tRaw, uv - o2).rgb));
         if(d < best){ best = d; bd = u; } worst = max(worst, d); }
-      gGrain = smoothstep(0.03, 0.10, worst - best); dirT = mixDir(dirT, bd, gGrain);
+      gGrain = smoothstep(0.03, 0.10, worst - best)*(1.0 - smoothstep(0.30, 0.55, best/max(worst, 1e-3)));   // (only a CLEAR direction: on a noisy texture the 'least change' way is random) dirT = mixDir(dirT, bd, gGrain);
       hlDef *= 1.0 + 0.8*gGrain; hwDef *= 1.0 - 0.45*gGrain;   // (along boards: long, narrow strokes)
     }
     if(early){                                            // (speed: strokes whose amount is already known to be nothing skip the traces)
@@ -2671,6 +2671,7 @@ function loadPack(name, data, root, opt){
     if(opt.sea) addSea(root, geo, opt.sea);
     if(opt.skyAll) root.userData.skyAll = true;
     if(opt.areaPow) root.userData.areaPow = opt.areaPow;
+    if(opt.around) root.userData.around = true;
     if(opt.grass) addGrassOn(root, geo, tileCol, opt.grass);
     if(opt.plate){ const pl = addPlateGround(geo, opt.plate); root.userData.fade = pl.fade; root.userData.frameBox = pl.frameBox; }
     let plank = null;
@@ -3074,7 +3075,7 @@ const MODELS = {
             
              pitchMin:0.25,   // (its hill stands in a painted ground, so the camera may circle low; not lower than this: the ground's far edge)
              fade:{ c:new THREE.Vector2(-0.25,-0.26), r:4.6, y:1.25 }, load:()=>loadPack('medieval', 'medieval', medievalGroup, { lift:1.15, blocks:{ col:[212,196,168], tol:0.06, size:[0.62,0.30] }, areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6, c:[-0.25,-0.26], r:4.4, col:[176,190,118], skirt:{ cols:[[124,90,64],[176,190,118]], tol:0.16, wall:[124,90,64], slope:0, amp:0.10 }, foot:{ stone:[132,104,84], nStones:40, sStone:0.09, bush:[86,118,58], nBushes:70, sBush:0.11 } }, stones:{ n:80, s:0.06, col:[132,104,84], on:[176,190,118] }, bushes:{ n:300, s:0.10, col:[86,118,58], on:[176,190,118] }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
-  castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:1.2, strokeK:0.55, coarseMin:0.4, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6, lift:1.35}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
+  castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:2.0, strokeK:0.55, coarseMin:0.4, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6, lift:1.15, around:true}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
 };
 const CFG = {};
 // the sun is set as a painter sets up the subject: from the front-left of its OPENING view, high (three-quarter light),
