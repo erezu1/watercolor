@@ -86,18 +86,22 @@ canvas:active{cursor:grabbing}
 .hint .hw-title{font-size:26px;font-weight:500;line-height:1.15;text-wrap:balance;font-variation-settings:'opsz' 72;color:#3f382d}
 .hint .hw-sub{font-size:14.5px;opacity:.7}
 /* (while the first painting loads: three watercolour strokes paint themselves, one after another, and dry away) */
-.hint .hw-brush{width:240px;height:58px;overflow:visible}
-.hint .hw-s{fill:none;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;opacity:0;animation:hwPaint 3.6s cubic-bezier(.45,.05,.35,1) infinite}
-.hint .hw-brush g{mix-blend-mode:multiply}
-.hint .hw-s1{stroke:#7fa6c9;stroke-width:9;--a:.62}
-.hint .hw-s2{stroke:#dca55e;stroke-width:7;--a:.62;animation-delay:.45s}
-.hint .hw-s3{stroke:#9db27a;stroke-width:6;--a:.62;animation-delay:.9s}
-.hint .hw-w{stroke-width:17;--a:.22}                    /* (the pale wash the pigment sits in) */
-.hint .hw-w.hw-s3{stroke-width:13}.hint .hw-w.hw-s2{stroke-width:14}
+.hw-brush{width:240px;height:58px;overflow:visible}
+.hw-s{fill:none;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;opacity:0;animation:hwPaint 3.6s cubic-bezier(.45,.05,.35,1) infinite}
+.hw-brush g{mix-blend-mode:multiply}
+.hw-s1{stroke:#7fa6c9;stroke-width:9;--a:.62}
+.hw-s2{stroke:#dca55e;stroke-width:7;--a:.62;animation-delay:.45s}
+.hw-s3{stroke:#9db27a;stroke-width:6;--a:.62;animation-delay:.9s}
+.hw-w{stroke-width:17;--a:.22}                    /* (the pale wash the pigment sits in) */
+.hw-w.hw-s3{stroke-width:13}.hw-w.hw-s2{stroke-width:14}
 @keyframes hwPaint{0%{stroke-dashoffset:1;opacity:var(--a)}38%{stroke-dashoffset:0;opacity:var(--a)}72%{stroke-dashoffset:0;opacity:calc(var(--a)*.8)}92%,100%{stroke-dashoffset:0;opacity:0}}
 .hint.welcome .hint-welcome{opacity:1}
 .hint.welcome .hint-anims,.hint.welcome .hint-text{opacity:0;transition:none}
 @keyframes hintSwipe{0%,100%{transform:translateX(-30px)}50%{transform:translateX(30px)}}
+/* (the same card while another painting is prepared: its name, the brush strokes) */
+.hint.loadcard{opacity:0;visibility:hidden;transition:opacity .45s ease,visibility 0s linear .45s;gap:6px}
+.hint.loadcard.on{opacity:1;visibility:visible;transition:opacity .45s ease}
+body.menu-open .hint.loadcard{opacity:0}
 .hint.gone{opacity:0;visibility:hidden;transition:opacity .9s ease,visibility 0s linear .9s}   /* (really gone once faded: an invisible blurred card still showed as a rectangle through the menu's blur) */
 .toast{
   position:fixed;left:50%;transform:translateX(-50%);
@@ -189,7 +193,7 @@ body.menu-open .toast{opacity:0}
 body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 .about{margin:0;font-size:14px;font-style:italic;line-height:1.4;color:var(--ink-soft);text-align:center}
 .pick-btn:focus-visible,.choices button:focus-visible,.mood:focus-visible,.peek:focus-visible,canvas:focus-visible{outline:2px solid #4a5da8;outline-offset:2px}
-@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hint .hw-s{animation:none;stroke-dashoffset:0;opacity:.6}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
+@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hw-s{animation:none;stroke-dashoffset:0;opacity:.6}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
 </style>
 
 </head>
@@ -217,6 +221,14 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
         <g class="hint-f2"><circle cx="32" cy="28" r="6"/><circle cx="32" cy="28" r="11" class="hint-ring"/></g></svg>
     </div>
     <span class="hint-text">Drag to turn · <span class="hint-touch">pinch</span><span class="hint-mouse">scroll</span> to zoom</span>
+  </div>
+  <div class="hint loadcard" id="loadcard" aria-live="polite">
+    <span class="hw-title" id="loadTitle"></span>
+    <svg class="hw-brush" viewBox="0 0 200 48" aria-hidden="true"><g filter="url(#wcEdge)">
+      <path class="hw-s hw-w hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/><path class="hw-s hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/>
+      <path class="hw-s hw-w hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/><path class="hw-s hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/>
+      <path class="hw-s hw-w hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/><path class="hw-s hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/></g></svg>
+    <span class="hw-sub">Painting…</span>
   </div>
   <div class="fail" id="fail">This painting needs WebGL 2, which your browser doesn’t seem to offer.</div>
 </div>
@@ -3281,12 +3293,12 @@ function goTo(name){
   if(name===current || switching) return;
   showAddress(name);
   const p = PAINTINGS.find(q=>q.id===name) || { title:'the test scene' };
-  if(p.heavy && !loaded[name] && !hint.classList.contains('welcome')){ toast.textContent='Painting '+p.title+'…'; toast.classList.add('on'); }
+  const lc = $('loadcard'); if(p.heavy && !loaded[name] && !hint.classList.contains('welcome')){ $('loadTitle').textContent = p.title; lc.classList.add('on'); }
   // the painting fades out to the paper, the new one is prepared, then fades in
   const wait = ms => new Promise(r=>setTimeout(r, ms));
   canvas.classList.add('faded');
-  switching = wait(reduceMotion ? 0 : 450).then(()=>setScene(name)).then(()=>wait(120)).then(()=>{ toast.classList.remove('on'); canvas.classList.remove('faded'); arrived(); })
-    .catch(()=>{ canvas.classList.remove('faded'); arrived(); toast.textContent='This one needs a newer browser'; setTimeout(()=>toast.classList.remove('on'),1800); })
+  switching = wait(reduceMotion ? 0 : 450).then(()=>setScene(name)).then(()=>wait(120)).then(()=>{ lc.classList.remove('on'); canvas.classList.remove('faded'); arrived(); })
+    .catch(()=>{ lc.classList.remove('on'); canvas.classList.remove('faded'); arrived(); toast.textContent='This one needs a newer browser'; toast.classList.add('on'); setTimeout(()=>toast.classList.remove('on'),1800); })
     .finally(()=>{ switching = null; });
 }
 function step(d){ const i = PAINTINGS.findIndex(p=>p.id===current); goTo(PAINTINGS[(i + d + PAINTINGS.length) % PAINTINGS.length].id); }
@@ -3642,7 +3654,7 @@ window.__pavilion = { rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }
     __sync=(k)=>{ if(renderer.getRenderTarget()) gl.readPixels(0,0,1,1,gl.RGBA,gl.FLOAT,f4); else gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px); const now=performance.now(); if(t) acc[k]=(acc[k]||0)+(now-t)/n; t=now; };
     for(let i=0;i<n;i++){ if(window.__passTurn) view.yaw += window.__passTurn; t=0; __sync('start'); render(); } __sync=null; delete acc.start; return acc; },
   brush:(k)=>{ planMat.uniforms.uSizeK.value = cfgFor(current).strokeK*k; resetStrokes=true; dirty=true; },   // (icons: a bigger brush)
-  chrome:(v)=>{ ['pickBtn','menuBtn','hint','toast'].forEach(id=>{ $(id).style.visibility = v ? '' : 'hidden'; }); },
+  chrome:(v)=>{ ['pickBtn','menuBtn','hint','toast','loadcard'].forEach(id=>{ $(id).style.visibility = v ? '' : 'hidden'; }); },
     stats:()=>{ const m=strokeMeshes[current]; return { strokes:m.total, perGlaze:m.meshes.map(x=>x.geometry.instanceCount), paint:[W,H], screen:[Wf,Hf] }; }, pencil:(v)=>{ finalMat.uniforms.uPencil.value=v; },
   // (test) how many strokes are painted, and how many appeared / disappeared since the last call, small and big
   strokeStats:()=>{ const gl=renderer.getContext(), n=STATE_S*STATE_S, b1=new Float32Array(n*4), b2=new Float32Array(n*4);
