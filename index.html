@@ -1274,7 +1274,7 @@ float simAt(vec4 c, vec4 d, vec4 e, vec3 g0, float s0, float z0, vec4 e0, float 
   float shp = max(max(same, alike), alikeL);
   if(mode > 0.99){                                      // the shadow passage: one value band across neighbouring pieces
     float simzF = 1.0-smoothstep(0.30*gZS, 0.70*gZS, abs(d.b*uDepthRange-z0));
-    return d.a*simzF*(1.0-smoothstep(0.10, 0.22, abs(modelV(c.a, d.g)-modelV(s0, cS0))))*mix(1.0, simc, step(0.01, uShadowOwn));   // (shade in the fur's OWN colour stops at the fur's colour borders: a calico's spot kept no orange fringe)
+    return d.a*simzF*(1.0-smoothstep(0.10, 0.22, abs(modelV(c.a, d.g)-modelV(s0, cS0))));   // (shade in the fur's OWN colour does not stop at its colour borders: the colour is taken per pixel (STROKE_FS uOwnPix), so no fringe and no seam)
   }
   float sims = mode > 0.99 ? 1.0-smoothstep(0.35, 0.65, abs(inShade(c.a)-inShade(s0))) : 1.0-smoothstep(tol*0.9, tol*1.7, abs(c.a-s0));
   return d.a*shp*simz*mix(simc, sims, mode);
@@ -1961,7 +1961,7 @@ const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn;
+uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -2076,7 +2076,15 @@ void main(){
     }
     float cS = vRamp.z < 1.1 ? clamp((vRamp.z - 1.0)/0.09, 0.0, 1.0) : 0.0, wS = 1.0 + uDomK*cS*(1.0 - r0)*(1.0 - r0);   // (a coarse shadow stroke holds its own tone)
     float rimS = uRimK*cS*smoothstep(0.62, 0.95, r0);
-    gl_FragColor = vec4(vCol.rgb*vCol.a*a*k*pig*(wS + rimS), wS*a*(vRamp.z > 1.5 ? 1.0 : 0.25 + 0.75*min(k, 1.0)));
+    vec3 colS = vCol.rgb;
+    if(uOwnPix > 0.0 && vRamp.z < 1.1){                // SHADE IN THE OWN COLOUR OF EACH PIXEL (a model whose shade keeps its colour:
+      // the cats): the colour under this pixel, not the stroke's middle — one shadow stroke runs over orange and white fur
+      // without carrying orange onto the white, and no seam is left where strokes stopped at the colour border
+      vec3 rp = texture2D(tRawS, gl_FragCoord.xy/uRes).rgb, Ap = -log(clamp(rp, 0.03, 1.0)); float mP = dot(Ap, vec3(0.3333));
+      vec3 ownP = mix(vec3(1.0), Ap/max(mP, 1e-3), 0.55*smoothstep(0.08, 0.35, mP));   // (part neutral, as shade is; pale fur: a soft neutral; mean absorbance 1)
+      colS = mix(vCol.rgb, ownP, uOwnPix);
+    }
+    gl_FragColor = vec4(colS*vCol.a*a*k*pig*(wS + rimS), wS*a*(vRamp.z > 1.5 ? 1.0 : 0.25 + 0.75*min(k, 1.0)));
     return;
     gl_FragColor = vec4(vCol.rgb*vCol.a*a*k*pig, a*(vRamp.z > 1.5 ? 1.0 : 0.25 + 0.75*min(k, 1.0)));   // (z 2, a narrow form: water all across, so pigment strength follows k)
   } else {
@@ -2183,7 +2191,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -3570,7 +3578,7 @@ async function setScene(name){
   Object.keys(MODELS).forEach(k=>{ MODELS[k].root().visible = k===name; });
   Object.keys(strokeMeshes).forEach(k=>{ strokeMeshes[k].meshes.forEach(x=>{ x.visible = (k===name); }); strokeMeshes[k].points.visible = (k===name); });
   const P = planMat.uniforms;
-  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1; P.uSkyAll.value = c.skyAll ? 1 : 0; P.uCoarseMin.value = OPT.coarseMin !== undefined ? OPT.coarseMin : (c.coarseMin || 0); P.uInkK.value = c.inkK || 1; P.uShadowOwn.value = c.shadowOwn || 0; P.uLineAll.value = c.lineAll ? 1 : 0; P.uWhiteLines.value = c.whiteLines ? 1 : 0; resolveMat.uniforms.uWhiteL.value = P.uWhiteLines.value; if(OPT.noWhite){ P.uWhiteLines.value = 0; resolveMat.uniforms.uWhiteL.value = 0; } P.uCoarseK.value = OPT.coarseK !== undefined ? OPT.coarseK : (c.coarseK !== undefined ? c.coarseK : 1); wetMat.uniforms.uPaintStop.value = P.uCoarseK.value > 0 ? 1 : 0; resolveMat.uniforms.uMarks.value = OPT.marks !== undefined ? OPT.marks : (c.marks || 0);   // (linear, as the reference) P.uCoverC.value = c.coverC || 2.5;   // (inkK: a model painted with stronger paint; coverC: how closely its coarse strokes cover)
+  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1; P.uSkyAll.value = c.skyAll ? 1 : 0; P.uCoarseMin.value = OPT.coarseMin !== undefined ? OPT.coarseMin : (c.coarseMin || 0); P.uInkK.value = c.inkK || 1; P.uShadowOwn.value = c.shadowOwn || 0; strokeMat.uniforms.uOwnPix.value = OPT.ownPix !== undefined ? OPT.ownPix : (c.shadowOwn || 0); P.uLineAll.value = c.lineAll ? 1 : 0; P.uWhiteLines.value = c.whiteLines ? 1 : 0; resolveMat.uniforms.uWhiteL.value = P.uWhiteLines.value; if(OPT.noWhite){ P.uWhiteLines.value = 0; resolveMat.uniforms.uWhiteL.value = 0; } P.uCoarseK.value = OPT.coarseK !== undefined ? OPT.coarseK : (c.coarseK !== undefined ? c.coarseK : 1); wetMat.uniforms.uPaintStop.value = P.uCoarseK.value > 0 ? 1 : 0; resolveMat.uniforms.uMarks.value = OPT.marks !== undefined ? OPT.marks : (c.marks || 0);   // (linear, as the reference) P.uCoverC.value = c.coverC || 2.5;   // (inkK: a model painted with stronger paint; coverC: how closely its coarse strokes cover)
   P.uFadeR.value = c.fade ? c.fade.r*(c.fadeK || 1) : 0; if(c.fade){ P.uFadeC.value.copy(c.fade.c); P.uFadeY.value = c.fade.y; }
   setupShadow(c);
   view.yaw=c.yaw; view.pitch=clampPitch(c.pitch); view.zoom=clampZoom(1); view.vyaw=0; view.vpitch=0;
