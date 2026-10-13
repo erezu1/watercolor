@@ -789,7 +789,7 @@ function splitLines(o, set){
   const m = new THREE.Mesh(g.userData.lineGeo, o.material); m.userData.role = 'line'; m.frustumCulled = false; m.layers.set(1); o.add(m);
 }
 function buildStrokes(root, countScale, skyN){
-  countScale = countScale||1; skyN = skyN===undefined ? 4600 : skyN;
+  countScale = countScale||1; skyN = skyN===undefined ? Math.round(4600*(root.userData.skyK || 1)) : skyN;   // (skyK: a painting with more sky strokes)
   const TA=[], TN=[], TAR=[], TRO=[], TSH=[], TM=[], TT=[], TW=[];
   root.updateMatrixWorld(true);
   const va=new THREE.Vector3(), vb=new THREE.Vector3(), vc=new THREE.Vector3(), e1=new THREE.Vector3(), e2=new THREE.Vector3();
@@ -2202,7 +2202,7 @@ const STATE_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tP0; uniform sampler2D tP1; uniform sampler2D tP2; uniform sampler2D tP3; uniform sampler2D tP4;
 uniform sampler2D tQ0; uniform sampler2D tQ1; uniform sampler2D tQ2; uniform sampler2D tQ3; uniform sampler2D tQ4; uniform sampler2D tQ5;
-uniform float uDt, uReset, uK, uDbgS, uRestT, uSpeed, uImgSpeed;
+uniform float uDt, uReset, uK, uDbgS, uRestT, uSpeed, uImgSpeed, uLineSnap;
 uniform sampler2D tW0; uniform sampler2D tW1; uniform sampler2D tW2; uniform sampler2D tW3; uniform vec2 uResP; uniform sampler2D tRank;   // last frame's washes   // (uImgSpeed: how fast the picture itself moves, px/s)
 layout(location=0) out highp vec4 o0;
 layout(location=1) out highp vec4 o1;
@@ -2230,6 +2230,13 @@ void stateMain(){
   bool present = p1.w > 0.5 && p2.w > 0.003;              // the plan has a mark for this stroke
   bool on = present && p4.w > 0.999;                      // ... and wants it painted (not thinned out)
   if(uReset > 0.5){ if(on){ o0 = p0; o1 = vec4(0.0, p1.yzw); o2 = p2; o3 = p3; o4 = vec4(0.0, p4.xy, 1.0); } else clearOut(); return; }
+  // A THIN THING'S LINE that fills the gap kept for it in the paint behind (a ladder, a frame) follows AT ONCE: the gap moves
+  // with the picture, so a line easing after it lay on the wall's colour for a moment — brown over blue is a dark trail
+  // (user: dragging the Moomin ladder leaves a dark lag). Such lines are thin: snapping them shows no jump.
+  bool lineQ = abs(q3.z - 1.25) < 0.01 || (abs(q3.x - 1.0) + abs(q3.y - 1.0) + abs(q3.z) < 0.01 && abs(q3.w - 2.0) < 0.01);
+  bool lineP = abs(p3.z - 1.25) < 0.01 || (abs(p3.x - 1.0) + abs(p3.y - 1.0) + abs(p3.z) < 0.01 && abs(p3.w - 2.0) < 0.01);
+  if(uLineSnap > 0.5 && (lineP || lineQ)){   // (both kinds of line: a formed rod (z 1.25) and a gap-filling line; also when it was one last frame)
+    if(on){ o0 = p0; o1 = vec4(0.0, p1.yzw); o2 = p2; o3 = p3; o4 = vec4(0.0, p4.xy, 1.0); } else clearOut(); return; }
   float rk = texelFetch(tRank, tx, 0).r; float h = hash(vec2(mod(rk, 320.0), floor(rk/320.0)));   // (the stroke's own random moment, from its place in the old shuffled order)
   bool moving = uRestT < 0.08 + 0.25*h;                  // (user: after the movement stops, everything is done within ~1 s)                   // (each stroke notices the hand has stopped at its own moment)
   float sizeG = p1.y + 2.0*p1.z;
@@ -2354,7 +2361,7 @@ let stateRead = 0, resetStrokes = true, noMemory = false;   // (noMemory: test h
 const stateMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
   uniforms:{ tP0:{value:rtPlan.texture[0]}, tP1:{value:rtPlan.texture[1]}, tP2:{value:rtPlan.texture[2]}, tP3:{value:rtPlan.texture[3]}, tP4:{value:rtPlan.texture[4]},
-             tQ0:{value:null}, tQ1:{value:null}, tQ2:{value:null}, tQ3:{value:null}, tQ4:{value:null}, tQ5:{value:null}, uDt:{value:1/60}, uReset:{value:1}, uK:{value:1}, uDbgS:{value:0}, uRestT:{value:10}, uSpeed:{value:0}, uImgSpeed:{value:0},
+             tQ0:{value:null}, tQ1:{value:null}, tQ2:{value:null}, tQ3:{value:null}, tQ4:{value:null}, tQ5:{value:null}, uDt:{value:1/60}, uReset:{value:1}, uK:{value:1}, uDbgS:{value:0}, uRestT:{value:10}, uSpeed:{value:0}, uImgSpeed:{value:0}, uLineSnap:{value:OPT.lineSnap === 0 ? 0 : 1},
              tW0:{value:null}, tW1:{value:null}, tW2:{value:null}, tW3:{value:null}, uResP:{value:new THREE.Vector2(1,1)}, tRank:{value:null} },
   vertexShader:`void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader:STATE_FS,
   depthTest:false, depthWrite:false, blending:THREE.NoBlending
@@ -3015,6 +3022,7 @@ function loadPack(name, data, root, opt){
     const tileCol = imgs.map(im => { const c = document.createElement('canvas'); c.width = c.height = 8; const x = c.getContext('2d'); x.drawImage(im, 0, 0, 8, 8);
       const d = x.getImageData(0, 0, 8, 8).data; const m = [0,0,0]; for(let i=0;i<64;i++) for(let k=0;k<3;k++) m[k] += d[i*4+k]/255/64; return m; });   // (each texture's mean colour)
     const floorCol = opt.ground && opt.ground.r ? (opt.ground.col ? opt.ground.col.map(v => Math.pow(v/255, 2.2)) : greenOf(geo, tileCol)) : null;   // (the floor's green: from the model, before stones and bushes)
+    if(opt.features) catFeatures(geo, tileCol, opt.features);
     if(opt.stones) appendStones(geo, tileCol, opt.stones);   // (before the floor: on the hill's own grass)
     if(opt.bushes) appendStones(geo, tileCol, Object.assign({ bush:true, seed:57 }, opt.bushes));
     if(opt.ground) addGround(root, geo, opt.ground.y, opt.ground.grass, opt.ground.r ? { c:opt.ground.c, r:opt.ground.r, col:floorCol, skirt:opt.ground.skirt, vary:opt.ground.vary, footStones:opt.ground.foot } : null, opt.ground.rk);
@@ -3022,6 +3030,7 @@ function loadPack(name, data, root, opt){
     if(opt.sea) addSea(root, geo, opt.sea);
     if(opt.skyAll) root.userData.skyAll = true;
     if(opt.areaPow) root.userData.areaPow = opt.areaPow;
+    if(opt.skyK) root.userData.skyK = opt.skyK;
     if(opt.around) root.userData.around = true;
     if(opt.grass) addGrassOn(root, geo, tileCol, opt.grass);
     if(opt.plate){ const pl = addPlateGround(geo, opt.plate); root.userData.fade = pl.fade; root.userData.frameBox = pl.frameBox; }
@@ -3269,6 +3278,35 @@ function appendDisc(geo, cx, y, cz, R, col){
 // STONES ON THE GRASS (the Hill Castle: user — "the mountain's grass, topography, stones"): low-poly rocks scattered
 // over the model's upward green faces, more where the ground is near an edge (a slope or cliff below), in a rock
 // colour (sRGB). Appended to the model's own mesh, so they are lit and painted like it; each stone is its own shape.
+// FEATURES OF A FIGURE (the Cat Trio, user: "the black cat's eyes more visible, perhaps white"; "thicker whiskers"):
+// the model's small separate pieces, found as connected parts. Compact small dark parts on the darkest texture (the
+// black cat) are made white (untextured, plain colour); long thin parts (whiskers) are made thicker about their axis.
+function catFeatures(geo, tileCol, o){
+  const pos = geo.attributes.position, col = geo.attributes.aCol, uvt = geo.attributes.aUvT, idx = geo.index, nV = pos.count;
+  const key = i => Math.round(pos.getX(i)*1e4)+','+Math.round(pos.getY(i)*1e4)+','+Math.round(pos.getZ(i)*1e4);
+  const par = new Int32Array(nV).map((_,i)=>i), f = a => { while(par[a] !== a){ par[a] = par[par[a]]; a = par[a]; } return a; }, un = (a,b) => { a = f(a); b = f(b); if(a !== b) par[a] = b; };
+  const seen = new Map(); for(let i=0;i<nV;i++){ const k = key(i), j = seen.get(k); if(j === undefined) seen.set(k, i); else un(i, j); }
+  for(let t=0;t<idx.count;t+=3){ un(idx.getX(t), idx.getX(t+1)); un(idx.getX(t), idx.getX(t+2)); }
+  const comps = new Map(); for(let i=0;i<nV;i++){ const r = f(i); if(!comps.has(r)) comps.set(r, []); comps.get(r).push(i); }
+  const lum = c => 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+  let dark = -1, dl = 9; tileCol.forEach((c, k) => { if(c && lum(c) < dl){ dl = lum(c); dark = k; } });
+  const white = (o.eyeCol || [245,240,228]).map(v => Math.pow(v/255, 2.2)); let nEye = 0, nWh = 0;
+  for(const vs of comps.values()){
+    if(vs.length < 4) continue;
+    const m = [0,0,0]; vs.forEach(i => { m[0] += pos.getX(i); m[1] += pos.getY(i); m[2] += pos.getZ(i); }); m.forEach((v,k) => m[k] = v/vs.length);
+    let cxx=0,cxy=0,cxz=0,cyy=0,cyz=0,czz=0; vs.forEach(i => { const x = pos.getX(i)-m[0], y = pos.getY(i)-m[1], z = pos.getZ(i)-m[2]; cxx+=x*x; cxy+=x*y; cxz+=x*z; cyy+=y*y; cyz+=y*z; czz+=z*z; });
+    let ax = [1,0,0]; for(let it=0; it<30; it++){ const v = [cxx*ax[0]+cxy*ax[1]+cxz*ax[2], cxy*ax[0]+cyy*ax[1]+cyz*ax[2], cxz*ax[0]+cyz*ax[1]+czz*ax[2]]; const l = Math.hypot(...v) || 1; ax = v.map(x => x/l); }
+    let len = 0, wid = 0; vs.forEach(i => { const d = [pos.getX(i)-m[0], pos.getY(i)-m[1], pos.getZ(i)-m[2]], a = d[0]*ax[0]+d[1]*ax[1]+d[2]*ax[2]; len = Math.max(len, Math.abs(a)); wid = Math.max(wid, Math.hypot(d[0]-a*ax[0], d[1]-a*ax[1], d[2]-a*ax[2])); });
+    if(len > 6*wid && len < o.maxLen){                       // a whisker: thicker about its own axis
+      vs.forEach(i => { const d = [pos.getX(i)-m[0], pos.getY(i)-m[1], pos.getZ(i)-m[2]], a = d[0]*ax[0]+d[1]*ax[1]+d[2]*ax[2];
+        pos.setXYZ(i, m[0] + a*ax[0] + (d[0]-a*ax[0])*o.whisker, m[1] + a*ax[1] + (d[1]-a*ax[1])*o.whisker, m[2] + a*ax[2] + (d[2]-a*ax[2])*o.whisker); col.setXYZ(i, 1, 1, 1); uvt.setZ(i, -1); }); nWh++;   // (user: whiskers exactly white)
+    } else if(len < 2.5*wid && len < o.eyeMax && Math.round(uvt.getZ(vs[0])) % 100 === dark){   // an eye of the black cat: white
+      vs.forEach(i => { col.setXYZ(i, white[0], white[1], white[2]); uvt.setZ(i, -1); }); nEye++;
+    }
+  }
+  pos.needsUpdate = col.needsUpdate = uvt.needsUpdate = true; geo.computeBoundingBox();
+  window.__features = { eyes:nEye, whiskers:nWh, dark, comps:comps.size };
+}
 function appendStones(geo, tileCol, o){
   const pos = geo.attributes.position, nor = geo.attributes.normal, col = geo.attributes.aCol, uvt = geo.attributes.aUvT, idx = geo.index;
   const T = [], A = []; let tot = 0; const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
@@ -3287,6 +3325,7 @@ function appendStones(geo, tileCol, o){
     const t = T[lo], a = idx.getX(t*3), b = idx.getX(t*3+1), c = idx.getX(t*3+2); let r1 = rg(), r2 = rg(); if(r1+r2 > 1){ r1 = 1-r1; r2 = 1-r2; }
     const p = [0,1,2].map(k => pos.getComponent(a,k) + r1*(pos.getComponent(b,k)-pos.getComponent(a,k)) + r2*(pos.getComponent(c,k)-pos.getComponent(a,k)));
     if(o.avoid && Math.hypot(p[0]-o.avoid.c[0], p[2]-o.avoid.c[1]) < o.avoid.r) continue;   // (not under the subject)
+    if(o.within && Math.hypot(p[0]-o.within.c[0], p[2]-o.within.c[1]) > o.within.r) continue;   // (and not out where the ground fades)
     const bush = !!o.bush, sz = o.s*(0.6 + rg()*0.8), sq = bush ? [0.9 + 0.4*rg(), 0.75 + 0.3*rg(), 0.9 + 0.4*rg()] : [1 + 0.5*rg(), 0.45 + 0.35*rg(), 1 + 0.5*rg()], rot = rg()*6.283, tone = 0.85 + 0.3*rg();
     const cr = Math.cos(rot), sr = Math.sin(rot), jit = []; for(let i=0;i<42;i++) jit.push(o.bush ? 0.85 + 0.3*rg() : 0.75 + 0.5*rg());
     const vk = new Map(); let ji = 0;
@@ -3448,8 +3487,9 @@ const MODELS = {
                fade:{ c:new THREE.Vector2(0.45,-0.1), r:5.9, y:-2.84 } },   // (a larger sea, fading out from just beyond the island)   // (more of its sea)   // (its own sea: faded in a ring round the island, not at the sea's far edges)
   moomin:  { root:()=>moominGroup, yaw:0.70, pitch:0.38, fit:0.88, shadeK:1.3, load:()=>loadPack('moomin', 'moomin_house', moominGroup, { ground:true, lift:1.4, planks:{ col:[50,80,120], tol:0.30, w:0.30, paint:[58,92,138] } }) },
   bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup, { plate:{ col:[230,169,118], base:[97,63,41], r:5.6 } }) },
-  cats:    { root:()=>catsGroup, yaw:0.10, pitch:0.26, fit:0.36, shadeK:1.0, marks:1.0, colK:0.6, coarseMin:0, coarseK:0, shadowOwn:0.75,   // (soft round animals: painted wet, shade in their own colour)   // (its fur patches are its pattern: kept, not averaged away)
-            load:()=>loadPack('cats', 'cats', catsGroup, { ground:{ y:-2.19, c:[0,0], r:11, col:[150,172,108], grass:0.9 }, groundBushes:{ n:46, s:0.55, col:[88,122,62], on:[150,172,108], avoid:{ c:[0,0], r:5.2 } } }) },
+  cats:    { root:()=>catsGroup, fade:{ c:new THREE.Vector2(0,0), r:9.5, y:-2.0 },   // (the meadow fades into the paper at its edge)
+            yaw:0.10, pitch:0.26, fit:0.36, shadeK:1.0, marks:1.0, colK:0.6, coarseMin:0, coarseK:0, shadowOwn:0.75,   // (soft round animals: painted wet, shade in their own colour)   // (its fur patches are its pattern: kept, not averaged away)
+            load:()=>loadPack('cats', 'cats', catsGroup, { skyK:1.6, features:{ whisker:1.8, maxLen:1.5, eyeMax:0.25 }, ground:{ y:-2.19, c:[0,0], r:11, col:[150,172,108], grass:0.9 }, groundBushes:{ n:46, s:0.55, col:[88,122,62], on:[150,172,108], avoid:{ c:[0,0], r:5.2 }, within:{ c:[0,0], r:7.6 } } }) },
   medieval:{ root:()=>medievalGroup, target:new THREE.Vector3(-0.25,1.30,-0.20), halfW:2.3, halfH:2.0, yaw:0.35, pitch:0.90, shadeK:1.4, strokeK:0.55, shadowHalf:4.2, shadowCenter:new THREE.Vector3(-0.25,0.4,-0.25),   // (the shadow map on the hill and castle, not the painted ground round it: 2x finer, no blocky shade)
                // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
             
