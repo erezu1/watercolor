@@ -18,5 +18,11 @@ This repository holds only the published page (one self-contained `index.html`).
   licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Converted for this page (geometry simplified, small texture).
 - **Japanese Bridge Garden** by kristenlee (https://sketchfab.com/3d-models/japanese-bridge-garden-d122e17593eb4012913cde927486d15a),
   licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Converted for this page.
+- **Floating Castle** by Shahriar Shahrabi (https://sketchfab.com/3d-models/floating-castle-1e157bab3a4042eb834ca07d73aa28ce),
+  licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Converted for this page (geometry simplified, colours
+  read from its texture, clouds made plain white; sky, birds, the flying machine, effects and outlines removed).
+- **Medieval castle with village** by Artbake Graphics (https://sketchfab.com/3d-models/medieval-castle-with-village-5109b5e46e064790badecedf8f6d2ef6),
+  licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Converted for this page (the castle and its hill only;
+  the village, forests and rock spires left out; walls recoloured).
 - **The Pavilion**: an original scene made for this page.
 - three.js (MIT) is loaded from jsDelivr.
