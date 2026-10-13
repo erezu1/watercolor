@@ -311,7 +311,8 @@ const OPT = window.__OPT = Object.assign({ quad:1, cull:1, early:1, sort:1, skip
 // (a phone: see intScale and quality below)
 const PHONE = (()=>{ try{ return matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) < 900; }catch(e){ return false; } })();
 const QS = new URLSearchParams(location.search);
-if(OPT.halfPlan === undefined) OPT.halfPlan = PHONE ? 1 : 0;   // (every phone: confirmed smooth on the user's phone)   // (while the view moves, the full plan every other frame; the anchors every frame)
+if(OPT.halfPlan === undefined) OPT.halfPlan = PHONE ? 1 : 0;   // (every phone: confirmed smooth on the user's phone; n: n light frames per full plan)
+if(OPT.settleEvery === undefined) OPT.settleEvery = PHONE ? 2 : 1;   // (while strokes settle, the plan follows the paint every n-th frame)   // (while the view moves, the full plan every other frame; the anchors every frame)
 
 let renderer;
 try{
@@ -1958,7 +1959,7 @@ const anchMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3,
              uNT:{value:0}, uS:{value:STATE_S}, uDepthRange:SHARED.uDepthRange, uDYaw:{value:0}, uDPitch:{value:0}, uAspect:{value:1}, uRes:{value:new THREE.Vector2(1,1)} },
   vertexShader:`void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader:ANCH_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending });
 const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneGeometry(2,2), anchMat); q.frustumCulled = false; anchScene.add(q); }
-let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0;
+let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
   uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uDomK:{value:10}, uRimK:{value:1.2} },
@@ -3413,11 +3414,11 @@ function render(dt){
   P.uCull.value = OPT.cull; P.uEarly.value = OPT.early; strokeMat.uniforms.uEarlyS.value = OPT.strokeEarly; wetMat.uniforms.uWetEarly.value = OPT.wetEarly; resolveMat.uniforms.uResDead.value = OPT.resolveDead;
   planFrame++;
   const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id,
-               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? planFrame : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
+               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
   const replan = !OPT.skipPlan || key !== lastPlanKey; lastPlanKey = key;
   // (OPT.halfPlan: while the view moves, every other frame only the anchors are moved — see ANCH_FS)
-  const light = replan && OPT.halfPlan && OPT.quad && !planLight && restT < 0.05 && !resetStrokes && !__sync;
-  planLight = light; if(light) lastPlanKey = ''; frameKind = !replan ? 2 : light ? 1 : 0;   // (frameKind: ?perf=1 readout)         // (the frame after a light one always plans in full)
+  const light = replan && OPT.halfPlan && OPT.quad && lightRun < OPT.halfPlan && restT < 0.05 && !resetStrokes && !__sync;
+  planLight = light; lightRun = light ? lightRun + 1 : 0; if(light) lastPlanKey = ''; frameKind = !replan ? 2 : light ? 1 : 0;   // (frameKind: ?perf=1 readout)         // (the frame after a light one always plans in full)
   if(replan){
   // 1. the 3D picture the painter looks at
   renderer.setRenderTarget(rtMain); renderer.setClearColor(CLEAR_ZERO, 0); renderer.render(scene, camera);
@@ -3532,7 +3533,7 @@ function perfTick(now){
   const q = (A, f) => { if(!A.length) return '–'; const B = A.slice().sort((a,b)=>a-b); return B[Math.min(B.length-1, Math.floor(f*B.length))].toFixed(1); };
   const m = strokeMeshes[current], mean = A => A.length ? (A.reduce((x,y)=>x+y,0)/A.length).toFixed(1) : '–';
   const sk = [0,0,0], ak = [0,0,0]; for(const [d,k] of perfT.kind){ ak[k]++; if(d > 50) sk[k]++; }
-  perfBox.textContent = `moving  mean ${mean(perfT.move)}  rest ${mean(perfT.rest)} ms\nslow (>50ms) after full/light/no plan: ${sk.join('/')} of ${ak.join('/')}\nmoving  median ${q(perfT.move,0.5)} ms  slow ${q(perfT.move,0.9)} ms  (${perfT.move.length})\nsettling median ${q(perfT.rest,0.5)} ms  slow ${q(perfT.rest,0.9)} ms  (${perfT.rest.length})\n`+
+  perfBox.textContent = `moving  mean ${mean(perfT.move)}  rest ${mean(perfT.rest)} ms\nslow>50ms after full/light/none\n  ${sk.join('/')} of ${ak.join('/')}\nmoving  median ${q(perfT.move,0.5)} ms  slow ${q(perfT.move,0.9)} ms  (${perfT.move.length})\nsettling median ${q(perfT.rest,0.5)} ms  slow ${q(perfT.rest,0.9)} ms  (${perfT.rest.length})\n`+
     `painting ${W}×${H}  screen ${Wf}×${Hf}  dpr ${(window.devicePixelRatio||1).toFixed(2)}\nscale ${intScale.toFixed(2)}  quality ${quality.toFixed(2)}  strokes ${m ? m.total : 0}  ${current}${PHONE ? '  phone' : ''}\n`+
     (perfT.passes ? perfT.passes.replace(/(([^ ]+ [^ ]+  ){5})/g, '$1\n') : 'tap here: time each stage');
 }
