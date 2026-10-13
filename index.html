@@ -1170,6 +1170,7 @@ void main(){
 const PLAN_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape; uniform sampler2D tLine; uniform sampler2D tRaw; uniform sampler2D tThinC; uniform sampler2D tThinD;
+uniform vec3 uRockCol; uniform float uRockK;
 uniform float uJit, uCutK, uHtK, uRoundK, uLineMax, uResvT, uSunK, uSunLo, uInkK, uCoverC, uBoardT;
 uniform vec2 uRes; uniform float uGrowMax, uCoarseMin, uCoarseSz, uToneK, uCoarseK, uCover1, uCoverG; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
 uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR, uEarly;   // (uShadeK: how strongly light and shade are told apart)
@@ -1581,7 +1582,10 @@ void main(){
     // flicker), colour and shadow strokes shrink — many small marks instead of a few big blended ones; smooth stays big
     float cE = 0.0;
     if(layer > 0.5 && layer < 1.5 && hasShape(e0) > 0.5 && !(vInfo.y > 10.5 && vInfo.y < 11.5)){   // (colour strokes only; never the sea: its own level strokes)
-      cE = uCoarseK*clamp(max(max(smoothstep(0.004, 0.025, Nv/max(Nw,1.0)), busy), uCoarseMin), 0.0, 1.0)*(narrowForm ? 0.0 : 1.0);   // (uCoarseMin: a painting whose whole texture is coarse)   // (texture alone on a smooth form is painted wet: the Moomin tower, the dome)
+      float rockE = 0.0;
+      if(uRockK > 0.0){ vec3 r3 = texture2D(tRaw, uv).rgb, ch = r3/max(dot(r3, vec3(1.0)), 1e-3), cr = uRockCol/max(dot(uRockCol, vec3(1.0)), 1e-3);
+        rockE = uRockK*(1.0 - smoothstep(0.05, 0.10, length(ch - cr)))*smoothstep(0.02, 0.08, dot(r3, vec3(0.3333))); }
+      cE = uCoarseK*clamp(max(max(max(smoothstep(0.004, 0.025, Nv/max(Nw,1.0)), busy), uCoarseMin), rockE), 0.0, 1.0)*(narrowForm ? 0.0 : 1.0);   // (uCoarseMin: a painting whose whole texture is coarse)   // (texture alone on a smooth form is painted wet: the Moomin tower, the dome)
       sz *= mix(1.0, uCoarseSz, cE);
     }
     float hlDef = sz*vInfo.w*0.5*(1.0 + 0.9*cE), hwDef = sz*0.5*(1.0 - 0.35*cE);   // (small textured strokes are THIN and long, not dabs)
@@ -1752,7 +1756,12 @@ void main(){
     // smooth curved form (the light turns steadily: a pole, a dome, a round tower) and a narrow form stay smooth. Coarse
     // strokes keep their identity: each its own tone, and paint does not flow between strokes of different tone (WET_FS).
     float roughN = smoothstep(0.004, 0.025, Nv/max(Nw,1.0)), roughT = smoothstep(0.03, 0.10, Tz/max(Tw,1.0)), roughB = busy;
-    float coarse = uCoarseK*clamp(max(max(roughN, roughB)*(1.0 - roundF), uCoarseMin), 0.0, 1.0)*(narrowForm ? 0.0 : 1.0)*hasShape(e0)*(isSea ? 0.0 : 1.0);
+    // (a model may name its ROCK colour (MODELS.rock): that material is painted coarse wherever it is, smooth or not — a
+    // flat cliff of it got one calm wash, user: "why the mountain there has no texture at all")
+    float rockM = 0.0;
+    if(uRockK > 0.0){ vec3 rr3 = texture2D(tRaw, uv).rgb, ch = rr3/max(dot(rr3, vec3(1.0)), 1e-3), cr = uRockCol/max(dot(uRockCol, vec3(1.0)), 1e-3);
+      rockM = uRockK*(1.0 - smoothstep(0.05, 0.10, length(ch - cr)))*smoothstep(0.02, 0.08, dot(rr3, vec3(0.3333))); }
+    float coarse = uCoarseK*clamp(max(max(max(roughN, roughB)*(1.0 - roundF), uCoarseMin), rockM), 0.0, 1.0)*(narrowForm ? 0.0 : 1.0)*hasShape(e0)*(isSea ? 0.0 : 1.0);
     float paleK = smoothstep(0.12, 0.60, lumA)*(1.0-smoothstep(0.25, 0.6, sat));   // (a white or pale material: in half light it still reads white)
     ht *= mix(1.0, 1.0 - smoothstep(0.15, 0.35, sP), paleK)*uHtK;   // only FLAT planes clearly turned away (a round form is modelled by the graded glaze)
     col = Ab;
@@ -1761,7 +1770,8 @@ void main(){
       if(rr.w < 0.15+0.25*uLoose){ col = mix(Ab, -log(clamp(mix(uWashA,uWashB,hash12(e0.zw*97.0)),0.05,1.0))*1.6, 0.35); }   // a varied tint, but one per shape (no spots)
     } else if(layer<1.5){                                 // coffee / milk: the colour of the shape
       amount = uInkK*0.62*(1.0-0.75*hiAmt*lit*(1.0-cutIn))*(1.0+0.5*cutIn)*(1.0+0.9*ht*mix(1.0, uShadeK, 0.35));
-      amount *= mix(1.18, mix(0.70, 1.0, kSun), smoothstep(0.25, 0.90, sP)*hasShape(e0));   // value: a diluted wash where the plane is lit, a richer one where it turns away
+      // (a DARK material in the light is still dark: diluted like a light one, a lit strip of dark rock became a pale streak)
+      amount *= mix(1.18, mix(mix(0.70, 1.0, kSun), 1.0, 0.75*(1.0 - smoothstep(0.08, 0.30, lumA))), smoothstep(0.25, 0.90, sP)*hasShape(e0));   // value: a diluted wash where the plane is lit, a richer one where it turns away
       col = Ab*(1.0 + (rr.y-0.5)*0.40*mix(uJit, 1.0, clamp(coarse, 0.0, 1.0))*vec3(-0.6,0.05,0.6))*(1.0 + (rnd2-0.5)*uToneK*coarse*(1.0 - gGrain)) + uWarm*lit*0.8 + (uShadow*1.7*(1.0 - 0.5*paleK) + Ab*0.35)*ht*mix(1.0, uShadeK, 0.35);   // a plane turning away: a little darker and cooler — its OWN colour, not a blue (a white sign went blue)
       if(uDbgP > 0.5){ col = vec3(0.05) + vec3(0.0,2.5,2.5)*ht + vec3(2.5,2.5,0.0)*(1.0-roomy); amount = 0.8; }   // debug: halftone (red), dropped as too small (blue)
     } else if(layer<2.5){                                 // the shadow passage: cool, transparent, carrying some local colour
@@ -2069,7 +2079,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uQK:{value:1}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
+    uQK:{value:1}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uRockCol:{value:new THREE.Vector3(0.5,0.35,0.25)}, uRockK:{value:0}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()}, uSkyAll:{value:0},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -2958,7 +2968,7 @@ function loadPack(name, data, root, opt){
     const floorCol = opt.ground && opt.ground.r ? (opt.ground.col ? opt.ground.col.map(v => Math.pow(v/255, 2.2)) : greenOf(geo, tileCol)) : null;   // (the floor's green: from the model, before stones and bushes)
     if(opt.stones) appendStones(geo, tileCol, opt.stones);   // (before the floor: on the hill's own grass)
     if(opt.bushes) appendStones(geo, tileCol, Object.assign({ bush:true, seed:57 }, opt.bushes));
-    if(opt.ground) addGround(root, geo, opt.ground.y, opt.ground.grass, opt.ground.r ? { c:opt.ground.c, r:opt.ground.r, col:floorCol, skirt:opt.ground.skirt, footStones:opt.ground.foot } : null);
+    if(opt.ground) addGround(root, geo, opt.ground.y, opt.ground.grass, opt.ground.r ? { c:opt.ground.c, r:opt.ground.r, col:floorCol, skirt:opt.ground.skirt, vary:opt.ground.vary, footStones:opt.ground.foot } : null);
     if(opt.sea) addSea(root, geo, opt.sea);
     if(opt.skyAll) root.userData.skyAll = true;
     if(opt.areaPow) root.userData.areaPow = opt.areaPow;
@@ -3054,6 +3064,7 @@ function addGround(root, geo, gy, gs, own){
     const ix = geo.index, keep = []; for(let t=0;t<ix.count/3;t++){ const a = ix.getX(t*3), b = ix.getX(t*3+1), c = ix.getX(t*3+2);
       if(Math.max(pos.getY(a), pos.getY(b), pos.getY(c)) < y0 + 0.02) continue; keep.push(a, b, c); }
     geo.setIndex(keep);
+    if(own.vary) varyFaces(geo, own.vary);
     if(own.skirt) appendSkirt(geo, y0, own.skirt);
     if(own.skirt && own.footStones) appendFoot(geo, own.footStones);
     appendDisc(geo, cx, y0, cz, R, own.col); }
@@ -3109,6 +3120,28 @@ function appendFoot(geo, o){
 // scene, so its terrain ends in open edges above the floor and you see under it. Every open edge (used by one triangle
 // only) of a TERRAIN triangle (its colour near one of sk.cols, sRGB, within sk.tol) that lies above the floor gets a wall
 // straight down to the floor, in sk.wall (sRGB), facing outward. Roofs and other open props are not terrain: untouched.
+// A DIVERSITY OF BROWNS (user: "some diversity of brownish colours to the faces of the ground of the mountain"): every
+// face of the given colours gets its own vertices and its own shade — lighter or darker, warmer or cooler — from a slow
+// noise (neighbouring faces related, as rock weathers in patches) plus a little of its own
+function varyFaces(geo, v){
+  const pos = geo.attributes.position, nor = geo.attributes.normal, col = geo.attributes.aCol, uvt = geo.attributes.aUvT, idx = geo.index, nT = idx.count/3;
+  const cols = v.cols.map(c => c.map(x => x/255));
+  const near = i => { const r = Math.pow(col.getX(i),1/2.2), g = Math.pow(col.getY(i),1/2.2), b = Math.pow(col.getZ(i),1/2.2); return cols.some(c => Math.hypot(r-c[0], g-c[1], b-c[2]) < v.tol); };
+  const P = [], N = [], C = [], U = [], ix = Array.from(idx.array); let nV = pos.count;
+  for(let t=0;t<nT;t++){ const a = idx.getX(t*3), b = idx.getX(t*3+1), c = idx.getX(t*3+2);
+    if(!(near(a) && near(b) && near(c))) continue;
+    const mx = (pos.getX(a)+pos.getX(b)+pos.getX(c))/3, my = (pos.getY(a)+pos.getY(b)+pos.getY(c))/3, mz = (pos.getZ(a)+pos.getZ(b)+pos.getZ(c))/3;
+    const f = v.freq || 2.5, own = fract01(mx*91.3 + my*47.1 + mz*13.7)*2 - 1;
+    const tn = 1 + (v.tone || 0.25)*(0.7*vnoise3(mx*f, my*f, mz*f) + 0.3*own), hu = (v.hue || 0.12)*(0.7*vnoise3(mx*f + 7, my*f + 3, mz*f) + 0.3*(fract01(mx*17.3 + mz*71.9)*2 - 1));
+    [a,b,c].forEach((i,k) => { P.push(pos.getX(i), pos.getY(i), pos.getZ(i)); N.push(nor.getX(i), nor.getY(i), nor.getZ(i)); U.push(uvt.getX(i), uvt.getY(i), uvt.getZ(i));
+      C.push(col.getX(i)*tn*(1+hu), col.getY(i)*tn, col.getZ(i)*tn*(1-hu)); ix[t*3+k] = nV++; });
+  }
+  if(!P.length) return;
+  const n0 = pos.count, cat = (A, B) => { const o = new Float32Array(A.length + B.length); o.set(A); o.set(B, A.length); return o; };
+  geo.setAttribute('position', new THREE.BufferAttribute(cat(pos.array, P),3)); geo.setAttribute('normal', new THREE.BufferAttribute(cat(nor.array, N),3));
+  geo.setAttribute('aCol', new THREE.BufferAttribute(cat(col.array, C),3)); geo.setAttribute('aUvT', new THREE.BufferAttribute(cat(uvt.array, U),3)); geo.setIndex(ix);
+  if(geo.userData.grp){ const g = new Int32Array(nV); g.set(geo.userData.grp); for(let t=0;t<nT;t++) for(let k=0;k<3;k++){ const i = ix[t*3+k]; if(i >= n0) g[i] = geo.userData.grp[idx.getX(t*3+k)] ?? 0; } geo.userData.grp = g; }
+}
 function appendSkirt(geo, y0, sk){
   const pos = geo.attributes.position, nor = geo.attributes.normal, col = geo.attributes.aCol, uvt = geo.attributes.aUvT, idx = geo.index, nT = idx.count/3;
   const key = i => Math.round(pos.getX(i)*1e4)+','+Math.round(pos.getY(i)*1e4)+','+Math.round(pos.getZ(i)*1e4);
@@ -3139,8 +3172,11 @@ function appendSkirt(geo, y0, sk){
         const e1 = [tri[1][0]-tri[0][0], tri[1][1]-tri[0][1], tri[1][2]-tri[0][2]], e2 = [tri[2][0]-tri[0][0], tri[2][1]-tri[0][1], tri[2][2]-tri[0][2]];
         let fn = [e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]]; const fl = Math.hypot(...fn) || 1; fn = fn.map(v => v/fl);
         if(fn[0]*nx + fn[2]*nz < 0) fn = fn.map(v => -v);
+        // (facets vary, but none turns far from the wall's own outward direction: where the top edge bends (under the path)
+        // skewed facets faced almost downward — a thin strip of 'another plane' got few strokes and showed as a pale streak)
+        { const k = 0.55; fn = [fn[0]*(1-k) + nx*k, fn[1]*(1-k), fn[2]*(1-k) + nz*k]; const l2 = Math.hypot(...fn) || 1; fn = fn.map(v => v/l2); }
         const mx = (tri[0][0]+tri[1][0]+tri[2][0])/3, my = (tri[0][1]+tri[1][1]+tri[2][1])/3, mz = (tri[0][2]+tri[1][2]+tri[2][2])/3;
-        const tn = 1 + (sk.tone || 0.18)*vnoise3(mx*2.2*(sk.freq ? sk.freq/3.1 : 1), my*2.2*(sk.freq ? sk.freq/3.1 : 1), mz*2.2*(sk.freq ? sk.freq/3.1 : 1)), hu = 0.10*vnoise3(mx*1.4 + 11, my*1.4, mz*1.4);
+        const tn = 1 + (sk.tone || 0.18)*vnoise3(mx*1.0, my*1.0, mz*1.0), hu = (sk.tone ? 0.25 : 0.10)*vnoise3(mx*0.9 + 11, my*0.9, mz*0.9);   // (patches larger than a brush: averaged at the brush's scale, finer ones vanish)
         for(const v of tri){ P.push(...v); N.push(...fn); C.push(wall[0]*tn*(1+hu), wall[1]*tn, wall[2]*tn*(1-hu)); }
       }
     }
@@ -3365,7 +3401,7 @@ const MODELS = {
                // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
             
              pitchMin:0.25,   // (its hill stands in a painted ground, so the camera may circle low; not lower than this: the ground's far edge)
-             fade:{ c:new THREE.Vector2(-0.25,-0.26), r:4.6, y:1.25 }, coverC:4.5, load:()=>loadPack('medieval', 'medieval', medievalGroup, { lift:(window.__OPT && window.__OPT.medLift) || 1.15, blocks:{ col:[212,196,168], tol:0.06, size:[0.62,0.30] }, areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6, c:[-0.25,-0.26], r:4.4, col:[176,190,118], skirt:{ cols:[[124,90,64],[176,190,118]], tol:0.16, wall:[124,90,64], slope:0, amp:(window.__OPT && window.__OPT.skAmp) || 0.12, freq:(window.__OPT && window.__OPT.skFreq) || 7.0, facet:0.12, tone:0.32 }, foot:{ stone:[132,104,84], nStones:40, sStone:0.09, bush:[86,118,58], nBushes:70, sBush:0.11 } }, stones:{ n:80, s:0.06, col:[132,104,84], on:[176,190,118] }, bushes:{ n:300, s:0.10, col:[86,118,58], on:[176,190,118] }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
+             fade:{ c:new THREE.Vector2(-0.25,-0.26), r:4.6, y:1.25 }, coverC:4.5, rock:[124,90,64], load:()=>loadPack('medieval', 'medieval', medievalGroup, { lift:(window.__OPT && window.__OPT.medLift) || 1.15, blocks:{ col:[212,196,168], tol:0.06, size:[0.62,0.30] }, areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6, c:[-0.25,-0.26], r:4.4, col:[176,190,118], vary:{ cols:[[124,90,64]], tol:0.18, tone:0.60, hue:0.30, freq:0.8 }, skirt:{ cols:[[124,90,64],[176,190,118]], tol:0.16, wall:[124,90,64], slope:0, amp:(window.__OPT && window.__OPT.skAmp) || 0.12, freq:(window.__OPT && window.__OPT.skFreq) || 7.0, facet:0.12, tone:0.55 }, foot:{ stone:[132,104,84], nStones:40, sStone:0.09, bush:[86,118,58], nBushes:70, sBush:0.11 } }, stones:{ n:80, s:0.06, col:[132,104,84], on:[176,190,118] }, bushes:{ n:300, s:0.10, col:[86,118,58], on:[176,190,118] }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
   castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, pitchMax:1.05,   // (from above it has no sky under it: bare paper)
             target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:2.0, strokeK:0.55, coarseMin:0.4, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6, lift:1.15, around:true}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
 };
@@ -3389,7 +3425,7 @@ async function setScene(name){
   Object.keys(MODELS).forEach(k=>{ MODELS[k].root().visible = k===name; });
   Object.keys(strokeMeshes).forEach(k=>{ strokeMeshes[k].meshes.forEach(x=>{ x.visible = (k===name); }); strokeMeshes[k].points.visible = (k===name); });
   const P = planMat.uniforms;
-  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1; P.uSkyAll.value = c.skyAll ? 1 : 0; P.uCoarseMin.value = OPT.coarseMin !== undefined ? OPT.coarseMin : (c.coarseMin || 0); P.uInkK.value = c.inkK || 1; P.uCoverC.value = c.coverC || 2.5;   // (inkK: a model painted with stronger paint; coverC: how closely its coarse strokes cover)
+  P.uSizeK.value = c.strokeK*(MODELS[name].root().userData.brushK || 1); P.uDetail.value = c.detail; P.uShadeK.value = c.shadeK || 1; P.uSkyAll.value = c.skyAll ? 1 : 0; P.uCoarseMin.value = OPT.coarseMin !== undefined ? OPT.coarseMin : (c.coarseMin || 0); P.uInkK.value = c.inkK || 1; P.uRockK.value = c.rock ? (OPT.rockK !== undefined ? OPT.rockK : 0.55) : 0; if(c.rock) P.uRockCol.value.set(...c.rock.map(v=>Math.pow(v/255, 2.2)));   // (linear, as the reference) P.uCoverC.value = c.coverC || 2.5;   // (inkK: a model painted with stronger paint; coverC: how closely its coarse strokes cover)
   P.uFadeR.value = c.fade ? c.fade.r*(c.fadeK || 1) : 0; if(c.fade){ P.uFadeC.value.copy(c.fade.c); P.uFadeY.value = c.fade.y; }
   setupShadow(c);
   view.yaw=c.yaw; view.pitch=clampPitch(c.pitch); view.zoom=clampZoom(1); view.vyaw=0; view.vpitch=0;
@@ -3684,7 +3720,7 @@ function render(dt){
   P.uCull.value = OPT.cull; P.uEarly.value = OPT.early; strokeMat.uniforms.uEarlyS.value = OPT.strokeEarly; wetMat.uniforms.uWetEarly.value = OPT.wetEarly; resolveMat.uniforms.uResDead.value = OPT.resolveDead;
   planFrame++;
   const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id,
-               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, PU.uQK.value, PU.uJit.value, PU.uCutK.value, PU.uHtK.value, PU.uRoundK.value, PU.uLineMax.value, PU.uResvT.value, PU.uSunK.value, PU.uSunLo.value, PU.uInkK.value, PU.uCoverC.value, PU.uBoardT.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
+               PU.uPaintRef.value, PU.uSmallShape.value, PU.uSkyAll.value, PU.uGrowMax.value, PU.uCoarseSz.value, PU.uCoarseMin.value, PU.uToneK.value, PU.uCoarseK.value, PU.uCover1.value, PU.uCoverG.value, PU.uQK.value, PU.uJit.value, PU.uCutK.value, PU.uHtK.value, PU.uRoundK.value, PU.uLineMax.value, PU.uResvT.value, PU.uSunK.value, PU.uSunLo.value, PU.uInkK.value, PU.uCoverC.value, PU.uRockK.value, PU.uBoardT.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? Math.floor(planFrame/(resetStrokes ? 1 : OPT.settleEvery)) : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
   const replan = !OPT.skipPlan || key !== lastPlanKey; lastPlanKey = key;
   // (OPT.halfPlan: while the view moves, every other frame only the anchors are moved — see ANCH_FS)
   const light = replan && OPT.halfPlan && OPT.quad && lightRun < OPT.halfPlan && restT < 0.05 && !resetStrokes && !__sync;
@@ -3891,6 +3927,9 @@ window.__pavilion = { rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }
     return r; },
   // (test) the plan's strokes, read back: for comparing two close views stroke by stroke
   dbgR:(v)=>{ planMat.uniforms.uDbgR.value = v; },
+  probe:(fx,fy)=>{ const gl=renderer.getContext(), f=new Float32Array(4), x=Math.floor(fx*W), y=Math.floor((1-fy)*H), out={};
+    const rd=(rt,i,k)=>{ renderer.setRenderTarget(rt); if(i!==null) gl.readBuffer(gl.COLOR_ATTACHMENT0+i); gl.readPixels(x,y,1,1,gl.RGBA,gl.FLOAT,f); out[k]=[...f].map(v=>+v.toFixed(3)); };
+    rd(rtMain,0,'colorLit'); rd(rtMain,1,'data'); rd(rtMain,2,'line'); rd(rtLit,null,'ref'); rd(rtMain,3,'shape'); rd(rtShapeM,null,'shapeM'); gl.readBuffer(gl.COLOR_ATTACHMENT0); renderer.setRenderTarget(null); return out; },
   infoRead:()=>strokeMeshes[current].attrTex[4].image.data,   // (test: each stroke's layer, kind, …)
   planRead:()=>{ const gl=renderer.getContext(), n=STATE_S*STATE_S, out=[];
     for(let i=0;i<5;i++){ const b=new Float32Array(n*4); renderer.setRenderTarget(rtPlan); gl.readBuffer(gl.COLOR_ATTACHMENT0+i); gl.readPixels(0,0,STATE_S,STATE_S,gl.RGBA,gl.FLOAT,b); out.push(b); }
