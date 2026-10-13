@@ -86,15 +86,24 @@ canvas:active{cursor:grabbing}
 .hint .hw-title{font-size:26px;font-weight:500;line-height:1.15;text-wrap:balance;font-variation-settings:'opsz' 72;color:#3f382d}
 .hint .hw-sub{font-size:14.5px;opacity:.7}
 /* (while the first painting loads: three watercolour strokes paint themselves, one after another, and dry away) */
-.hw-brush{width:240px;height:58px;overflow:visible}
-.hw-s{fill:none;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;opacity:0;animation:hwPaint 3.6s cubic-bezier(.45,.05,.35,1) infinite}
+.hw-brush{width:250px;height:90px;overflow:visible}
 .hw-brush g{mix-blend-mode:multiply}
-.hw-s1{stroke:#7fa6c9;stroke-width:9;--a:.62}
-.hw-s2{stroke:#dca55e;stroke-width:7;--a:.62;animation-delay:.45s}
-.hw-s3{stroke:#9db27a;stroke-width:6;--a:.62;animation-delay:.9s}
-.hw-w{stroke-width:17;--a:.22}                    /* (the pale wash the pigment sits in) */
-.hw-w.hw-s3{stroke-width:13}.hw-w.hw-s2{stroke-width:14}
-@keyframes hwPaint{0%{stroke-dashoffset:1;opacity:var(--a)}38%{stroke-dashoffset:0;opacity:var(--a)}72%{stroke-dashoffset:0;opacity:calc(var(--a)*.8)}92%,100%{stroke-dashoffset:0;opacity:0}}
+/* (a tiny landscape paints itself, as a sketch is begun: sky wash, far hill, sun blooming wet, near hill, tree dabs;
+   then it dries away and begins again — one 5 s timeline) */
+.hl{fill:none;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:5s cubic-bezier(.45,.05,.35,1) infinite}
+.hl-sky{stroke:#a9c6df;stroke-width:20;animation-name:hlSky}
+.hl-far{stroke:#7f9cc0;stroke-width:10;animation-name:hlFar}
+.hl-near{stroke:#9db27a;stroke-width:17;animation-name:hlNear}
+.hl-t1,.hl-t2,.hl-t3{stroke:#5f7a55;stroke-width:8}
+.hl-t1{animation-name:hlT1}.hl-t2{animation-name:hlT2}.hl-t3{animation-name:hlT3}
+.hl-sun{fill:#e8b25e;transform-box:fill-box;transform-origin:center;animation:hlSun 5s ease-out infinite}
+@keyframes hlSky{0%{stroke-dashoffset:1;opacity:.42}16%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.36}96%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes hlFar{0%,12%{stroke-dashoffset:1;opacity:0}12.5%{stroke-dashoffset:.99;opacity:.55}28%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.48}96%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes hlSun{0%,26%{transform:scale(0);opacity:.0}29%{opacity:.6}40%{transform:scale(1);opacity:.6}84%{transform:scale(1.08);opacity:.5}96%,100%{transform:scale(1.08);opacity:0}}
+@keyframes hlNear{0%,34%{stroke-dashoffset:1;opacity:0}34.5%{stroke-dashoffset:.99;opacity:.62}50%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.55}96%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes hlT1{0%,52%{stroke-dashoffset:1;opacity:0}52.5%{stroke-dashoffset:.99;opacity:.75}57%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.65}96%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes hlT2{0%,56%{stroke-dashoffset:1;opacity:0}56.5%{stroke-dashoffset:.99;opacity:.75}61%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.65}96%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes hlT3{0%,60%{stroke-dashoffset:1;opacity:0}60.5%{stroke-dashoffset:.99;opacity:.75}65%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.65}96%,100%{stroke-dashoffset:0;opacity:0}}
 .hint.welcome .hint-welcome{opacity:1}
 .hint.welcome .hint-anims,.hint.welcome .hint-text{opacity:0;transition:none}
 @keyframes hintSwipe{0%,100%{transform:translateX(-30px)}50%{transform:translateX(30px)}}
@@ -193,7 +202,7 @@ body.menu-open .toast{opacity:0}
 body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 .about{margin:0;font-size:14px;font-style:italic;line-height:1.4;color:var(--ink-soft);text-align:center}
 .pick-btn:focus-visible,.choices button:focus-visible,.mood:focus-visible,.peek:focus-visible,canvas:focus-visible{outline:2px solid #4a5da8;outline-offset:2px}
-@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hw-s{animation:none;stroke-dashoffset:0;opacity:.6}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
+@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hl,.hl-sun{animation:none;stroke-dashoffset:0;opacity:.55}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
 </style>
 
 </head>
@@ -203,12 +212,14 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
   <div class="hint welcome" id="hint" aria-hidden="true">
     <span class="hint-welcome">
       <span class="hw-title">Welcome to 3D paintings</span>
-      <svg class="hw-brush" viewBox="0 0 200 48" aria-hidden="true">
+      <svg class="hw-brush" viewBox="0 0 200 72" aria-hidden="true">
         <defs><filter id="wcEdge" x="-10%" y="-40%" width="120%" height="180%"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="7"/><feGaussianBlur stdDeviation="0.6"/></filter></defs>
         <g filter="url(#wcEdge)">
-          <path class="hw-s hw-w hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/><path class="hw-s hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/>
-          <path class="hw-s hw-w hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/><path class="hw-s hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/>
-          <path class="hw-s hw-w hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/><path class="hw-s hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/>
+          <path class="hl hl-sky" pathLength="1" d="M10 20 C60 13 140 13 190 20"/>
+          <path class="hl hl-far" pathLength="1" d="M12 50 C46 36 84 36 114 44 C144 52 170 42 188 38"/>
+          <circle class="hl-sun" cx="150" cy="22" r="8"/>
+          <path class="hl hl-near" pathLength="1" d="M10 63 C60 50 124 55 190 62"/>
+          <path class="hl hl-t1" pathLength="1" d="M42 56 L42 49"/><path class="hl hl-t2" pathLength="1" d="M51 57 L51 52"/><path class="hl hl-t3" pathLength="1" d="M137 56 L137 47"/>
         </g>
       </svg>
       <span class="hw-sub">Mixing the paints…</span>
@@ -224,10 +235,13 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
   </div>
   <div class="hint loadcard" id="loadcard" aria-live="polite">
     <span class="hw-title" id="loadTitle"></span>
-    <svg class="hw-brush" viewBox="0 0 200 48" aria-hidden="true"><g filter="url(#wcEdge)">
-      <path class="hw-s hw-w hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/><path class="hw-s hw-s1" pathLength="1" d="M16 30 C50 14 84 14 118 24"/>
-      <path class="hw-s hw-w hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/><path class="hw-s hw-s2" pathLength="1" d="M70 34 C104 26 140 22 184 28"/>
-      <path class="hw-s hw-w hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/><path class="hw-s hw-s3" pathLength="1" d="M40 20 C76 30 120 36 160 18"/></g></svg>
+    <svg class="hw-brush" viewBox="0 0 200 72" aria-hidden="true"><g filter="url(#wcEdge)">
+          <path class="hl hl-sky" pathLength="1" d="M10 20 C60 13 140 13 190 20"/>
+          <path class="hl hl-far" pathLength="1" d="M12 50 C46 36 84 36 114 44 C144 52 170 42 188 38"/>
+          <circle class="hl-sun" cx="150" cy="22" r="8"/>
+          <path class="hl hl-near" pathLength="1" d="M10 63 C60 50 124 55 190 62"/>
+          <path class="hl hl-t1" pathLength="1" d="M42 56 L42 49"/><path class="hl hl-t2" pathLength="1" d="M51 57 L51 52"/><path class="hl hl-t3" pathLength="1" d="M137 56 L137 47"/>
+        </g></svg>
   </div>
   <div class="fail" id="fail">This painting needs WebGL 2, which your browser doesn’t seem to offer.</div>
 </div>
