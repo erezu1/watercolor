@@ -1399,7 +1399,7 @@ void main(){
       hw *= mix(1.0, 0.80, smoothstep(2.5*uK, 5.0*uK, hw));   // (a thick beam: its measured radius is to its corners; a box is narrower than that)
       hl = 0.5*len + hw;
       tc = ((pa+pb)*0.5/uRes)*2.0-1.0;
-      amount = 0.9*uCables; vis = 1.0;
+      amount = 0.9*uCables*smoothstep(1.2, 2.2, len/max(2.0*hw, 1e-3)); vis = 1.0;   // (a piece seen END-ON — shorter than it is wide — is no line: it was a round dark dab, user: black blots at the Hill Castle gate)
       if(uFadeR > 0.0 && vPos.y <= uFadeY) amount *= 1.0 - smoothstep(0.70, 1.0, length(vPos.xz - uFadeC)/uFadeR);   // (lines on the ground fade with it: no lone dashes)
       // a thin thing like what is behind it (a plank on its roof) needs no line: that colour is painted already. A lighter
       // one (a white frame on a blue wall) is RESERVED in the strokes behind it (STROKE_FS/WET_FS) and gets its own
@@ -1809,6 +1809,7 @@ void main(){
       col = Ab*1.15 + uShadow*0.5;
       if(texBusy > busy){ amount = 0.55*step(0.35, rr.y)*texBusy*mix(1.0,0.5,uDetail)*smoothstep(0.25, 0.6, sP); col = Ab*1.35 + uShadow*0.25 + vec3(0.06);   // (a tone of its own colour)
         hl = max(hl, hlDef*1.4); hw = min(hw, max(1.2*uK, 0.35*hw)); }
+      amount *= smoothstep(0.06, 0.16, lumA);   // (texture on grass and leaves — never on a near-black hole: a dark gateway's flecks were black blots, user)
     }
     if(layer > 0.5 && layer < 1.5 && ramp.z < 0.5) ramp.y = coarse;
     coarseF = layer > 0.5 && layer < 1.5 ? coarse : 0.0;
@@ -2068,7 +2069,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uQK:{value:1}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:60}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
+    uQK:{value:1}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()}, uSkyAll:{value:0},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -2489,7 +2490,7 @@ uniform vec2 uResI; uniform float uKi, uSolo, uWetOn, uDR, uDtR, uResetR, uGranK
 layout(location=0) out highp vec4 oAbs;   // the painting (absorbance)
 layout(location=1) out highp vec4 oE;     // how far the blending has got (kept from frame to frame)
 ${FS_COMMON}
-uniform sampler2D tThinDR; uniform sampler2D tThinCR; uniform sampler2D tRawR;
+uniform sampler2D tThinDR; uniform sampler2D tThinCR; uniform sampler2D tRawR; uniform float uFill;
 float gEdgeK = 1.0;   // (no pigment collects at a border that is a reserved light: the paper left for a ladder, a frame)
 float resR(vec2 q){
   vec4 tD = texture2D(tThinDR, q); if(tD.a < 0.5) return 0.0;
@@ -2601,7 +2602,21 @@ void main(){
   oE = vec4(E, fresh);
   vec3 A1 = (A1d + E)*(1.0 - rvC), A2 = A2d*(1.0 - rvC);   // (no wall colour inside a reserved light: brown over the blue that crept in went black — the ladder)
   vec3 A3 = wash(tG3, 0.17, 0.33, nz, 0.50, 2.5);
-  { float c3 = smoothstep(0.17, 0.33, texture2D(tG3, vUv).a)*(1.0 - gEdgeK); A1 *= 1.0 - c3; A2 *= 1.0 - c3; }   // (at a reserved light's edge its own paint (the ladder) and the wall's never stack: brown over blue is black)
+  { float c3 = smoothstep(0.17, 0.33, texture2D(tG3, vUv).a)*(1.0 - gEdgeK); A1 *= 1.0 - c3; A2 *= 1.0 - c3; }
+  // NO PAPER HOLES INSIDE A WASH (user: white spots in the Hill Castle rock): a spot no colour stroke reached, but with
+  // paint all around it, is filled with the colour of that paint — a painter's wash is continuous; the strokes decide
+  // its edges, not holes in it. Paper stays only at real edges, lights left on purpose (their strokes are there, pale)
+  // and reserved lights.
+  if(uFill > 0.0){
+    float c1h = smoothstep(0.17, 0.35, texture2D(tG1, vUv).a);
+    if(c1h < 0.9 && covC > 0.5){
+      vec3 pg = vec3(0.0); float nr = 0.0, rf = 7.0*uKi;
+      for(int i=0;i<8;i++){ float a = float(i)*0.7853982 + 0.2; vec4 g = texture2D(tG1, vUv + vec2(cos(a), sin(a))*rf/uResI);
+        float c = step(0.30, g.a); pg += c*g.rgb/max(g.a, 1e-3); nr += c; }
+      float hole = (1.0 - c1h)*smoothstep(5.5, 7.5, nr)*(1.0 - rvC);
+      if(hole > 0.0) A1 += uFill*hole*pg/max(nr, 1.0);
+    }
+  }   // (at a reserved light's edge its own paint (the ladder) and the wall's never stack: brown over blue is black)
   if(uSolo > 4.5 && uSolo < 5.5){ oAbs = vec4(vec3(1.0-wf.r, 1.0-wf.g, 1.0)*1.5, rawNow); return; }   // debug: where the paint is wet
   if(uSolo > 5.5){ oAbs = vec4(vec3(0.0, behind*2.0, border*2.0), rawNow); return; }   // debug: shape borders (blue) and cut-in (green)
 
@@ -2737,7 +2752,7 @@ const wetMat = new THREE.ShaderMaterial({
 const wetScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), wetMat); q.frustumCulled=false; wetScene.add(q); }
 const resolveMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
-  uniforms:{ tThinDR:{value:null}, tThinCR:{value:null}, tRawR:{value:null}, tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1}, uResDead:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
+  uniforms:{ uFill:{value:OPT.fill !== undefined ? OPT.fill : 0.85}, tThinDR:{value:null}, tThinCR:{value:null}, tRawR:{value:null}, tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1}, uResDead:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
   vertexShader:QUAD_VS, fragmentShader:RESOLVE_FS, depthTest:false, depthWrite:false
 });
 const finalMat = new THREE.ShaderMaterial({
@@ -3364,7 +3379,7 @@ function lightFromView(yaw){
 const cfgFor = name => CFG[name] || (CFG[name] = (()=>{ const c = Object.assign(autoCfg(MODELS[name].root(), MODELS[name].fit), MODELS[name]);
   if(!MODELS[name].light && MODELS[name].yaw !== undefined) c.light = lightFromView(c.yaw); return c; })());
 let current = 'pavilion';
-let quality = QS.get('q') ? Number(QS.get('q')) : PHONE ? 0.75 : 1;
+let quality = QS.get('q') ? Number(QS.get('q')) : 1;   // (all strokes on every device: fewer left the washes with paper gaps — user, the Hill Castle rock)
 function applyQuality(){ Object.values(strokeMeshes).forEach(m=>{ m.meshes.forEach(x=>{ x.geometry.instanceCount=OPT.sort ? x.geometry.userData.total : Math.floor(x.geometry.userData.total*quality); }); m.points.geometry.setDrawRange(0,OPT.sort ? m.total : Math.ceil(m.total*quality)); });
   const q = strokeShare(), M = strokeMeshes[current]; planMat.uniforms.uQK.value = q*(1 + (M ? M.rEff : 0));
   planMat.uniforms.uQN.value = OPT.sort ? Math.ceil((M ? M.base : 1e9)*q) : 1e9; }   // (sorted strokes: quality by rank, see buildStrokes)
@@ -3779,8 +3794,7 @@ function frame(now){
   if(perfBox) perfTick(now);
   emaDt += (dt*1000-emaDt)*0.08;
   if(emaDt>36 && ++slowFrames>45 && !OPT.noAdapt){
-    if(intScale>0.45){ intScale = Math.max(0.45, intScale*0.88); fit(); }
-    else if(quality>0.45){ quality = Math.max(0.45, quality*0.8); applyQuality(); }
+    if(intScale>0.40){ intScale = Math.max(0.40, intScale*0.9); fit(); }   // (only the resolution gives way: never the strokes, which hold the washes together)
     slowFrames=0; emaDt=16;
   }
 }
