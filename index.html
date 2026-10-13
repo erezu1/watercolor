@@ -1969,12 +1969,12 @@ void main(){
   }
 }`;
 
-const STATE_S = 448;                                    // 448 x 448 = up to 200k strokes, one texel each
+const SOW = OPT.sow || (PHONE ? 1 : 2);                 // (phone, measured: twice the slots cost ~40% per frame even unused — see below)
+const STATE_S = SOW > 1 ? 448 : 320;                    // 448 x 448 = up to 200k strokes, one texel each (320: 102k)
 // STROKES FOR THE VIEW (user: "zoomed in, most of them are out of the picture — can't you make more inside?"): every model
 // is sown with SOW times the strokes it needs at its usual distance; only a share of them takes part, by the same random
 // rank that quality uses — 1/SOW at the usual distance, more as the view comes nearer (as many per area of PAPER as
 // before, instead of a few stretched marks), fewer far away. New ones grow in and dropped ones dry away, as always.
-const SOW = OPT.sow || 2;
 function strokeShare(){ const z = Math.max(view.zoom, 0.05); return Math.min(1, quality/SOW*Math.min(SOW, Math.max(0.5, 1/(z*z)))); }
 const strokeScenes = [0,1,2,3].map(()=>new THREE.Scene());
 const planScene = new THREE.Scene();
