@@ -3451,6 +3451,7 @@ function frame(now){
   if(now > animUntil) return;                            // nothing changing: the painting stays as it is
   dirty=false;
   render(dt);
+  if(perfBox) perfTick(now);
   emaDt += (dt*1000-emaDt)*0.08;
   if(emaDt>36 && ++slowFrames>45){
     if(intScale>0.45){ intScale = Math.max(0.45, intScale*0.88); fit(); }
@@ -3459,6 +3460,21 @@ function frame(now){
   }
 }
 
+// PERFORMANCE READOUT (?perf=1): frame times measured on the device itself — median and slowest tenth, separately while
+// the view moves (dragging, coasting, the opening turn) and while the strokes settle; plus the painting's resolution
+const perfBox = /[?&]perf=1/.test(location.search) ? (()=>{ const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:8px;left:8px;z-index:9;font:12px/1.35 ui-monospace,monospace;background:rgba(255,255,255,.85);color:#222;padding:6px 8px;border-radius:8px;pointer-events:none;white-space:pre';
+  document.body.appendChild(d); return d; })() : null;
+const perfT = { move:[], rest:[], last:0, shown:0 };
+function perfTick(now){
+  const dt = perfT.last ? now - perfT.last : 0; perfT.last = now; if(!dt || dt > 250) return;
+  const L = restT < 0.05 ? perfT.move : perfT.rest; L.push(dt); if(L.length > 120) L.shift();
+  if(now - perfT.shown < 500) return; perfT.shown = now;
+  const q = (A, f) => { if(!A.length) return '–'; const B = A.slice().sort((a,b)=>a-b); return B[Math.min(B.length-1, Math.floor(f*B.length))].toFixed(1); };
+  const m = strokeMeshes[current];
+  perfBox.textContent = `moving  median ${q(perfT.move,0.5)} ms  slow ${q(perfT.move,0.9)} ms  (${perfT.move.length})\nsettling median ${q(perfT.rest,0.5)} ms  slow ${q(perfT.rest,0.9)} ms  (${perfT.rest.length})\n`+
+    `painting ${W}×${H}  screen ${Wf}×${Hf}  dpr ${(window.devicePixelRatio||1).toFixed(2)}\nscale ${intScale.toFixed(2)}  quality ${quality.toFixed(2)}  strokes ${m ? m.total : 0}  ${current}`;
+}
 // the first painting opens (or ?scene=<id>, which can also open the test scene); the pavilion is drawn while it loads
 fit(); setMood(0,false);
 { const want = fromAddress(), first = want || PAINTINGS[0].id;
@@ -3502,7 +3518,7 @@ window.__pavilion = { rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }
     // (a float target must be read as FLOAT: RGBA/UNSIGNED_BYTE there is INVALID_OPERATION and returns without waiting,
     // which put the whole frame into 'final'. Each number still includes ~0.4 ms of the read itself.)
     __sync=(k)=>{ if(renderer.getRenderTarget()) gl.readPixels(0,0,1,1,gl.RGBA,gl.FLOAT,f4); else gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px); const now=performance.now(); if(t) acc[k]=(acc[k]||0)+(now-t)/n; t=now; };
-    for(let i=0;i<n;i++){ t=0; __sync('start'); render(); } __sync=null; delete acc.start; return acc; },
+    for(let i=0;i<n;i++){ if(window.__passTurn) view.yaw += window.__passTurn; t=0; __sync('start'); render(); } __sync=null; delete acc.start; return acc; },
   brush:(k)=>{ planMat.uniforms.uSizeK.value = cfgFor(current).strokeK*k; resetStrokes=true; dirty=true; },   // (icons: a bigger brush)
   chrome:(v)=>{ ['pickBtn','menuBtn','hint','toast'].forEach(id=>{ $(id).style.visibility = v ? '' : 'hidden'; }); },
     stats:()=>{ const m=strokeMeshes[current]; return { strokes:m.total, perGlaze:m.meshes.map(x=>x.geometry.instanceCount), paint:[W,H], screen:[Wf,Hf] }; }, pencil:(v)=>{ finalMat.uniforms.uPencil.value=v; },
