@@ -907,6 +907,12 @@ precision highp float; precision highp sampler2D;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape; uniform sampler2D tLine; uniform sampler2D tRaw; uniform sampler2D tThinC; uniform sampler2D tThinD;
 uniform vec2 uRes; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
 uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR, uEarly;   // (uShadeK: how strongly light and shade are told apart)
+// PLANNED AGAINST THE PAPER (readability study): lines and darks are the last glaze; what the first three glazes have
+// already put down (last frame's buffers) is subtracted, so a dark is never counted twice (black bars on boards, dabs on
+// tiles). They depend only on glazes 0-2, which do not depend on them: no feedback loop. uPaintRef 0 = the old rule.
+uniform sampler2D tG0p; uniform sampler2D tG1p; uniform sampler2D tG2p; uniform float uPaintRef;
+vec3 underA(vec2 q){ vec4 a = texture2D(tG0p,q), b = texture2D(tG1p,q), c = texture2D(tG2p,q);
+  return a.rgb/max(a.a,1e-3)*smoothstep(0.04,0.40,a.a) + b.rgb/max(b.a,1e-3)*smoothstep(0.17,0.35,b.a) + c.rgb/max(c.a,1e-3)*smoothstep(0.18,0.34,c.a); }
 uniform vec3 uShadow, uWarm, uWashA, uWashB, uSky, uSkyA, uSkyB;
 varying vec3 vPos; varying vec3 vNor; varying vec4 vClip; varying vec4 vClip2; varying float vNdv; varying vec4 vRnd; varying vec4 vInfo; varying float vDen;
 layout(location=0) out highp vec4 oS0;   // path: start (px), start heading, bend
@@ -1071,7 +1077,7 @@ void main(){
     // reflected light on its far side (three values across the stroke, as the graded modelling strokes have)
     vec2 P0 = vClip.xy/max(vClip.w,1e-3), P1 = vClip2.xy/max(vClip2.w,1e-3);
     vec2 dW = (P1-P0)*uRes; vec2 nW = length(dW) > 1e-3 ? vec2(-dW.y, dW.x)/length(dW) : vec2(0.0);
-    vec3 pr0 = vec3(0.0), pr1 = vec3(0.0), pr2 = vec3(0.0); float pn = 0.0;
+    vec3 pr0 = vec3(0.0), pr1 = vec3(0.0), pr2 = vec3(0.0); float pn = 0.0; vec3 Au = vec3(0.0); float dRef = 0.0, dPnt = 0.0;
     for(int i=0;i<=16;i++){
       vec4 c = mix(vClip, vClip2, float(i)/16.0);
       vec2 q = c.xy/max(c.w,1e-3)*0.5+0.5;
@@ -1080,12 +1086,13 @@ void main(){
       if(seen){ if(r0 < 0) r0 = i; if(i - r0 > b1 - b0){ b0 = r0; b1 = i; } } else r0 = -1;
       vec4 dT = texture2D(tThinD, q);
       if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < max(tolZ, 2.2*vInfo.z + 0.008)){   // (a wide piece's surface is far from its centre line: the chimney)
-        vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0;   // its material colour, darkened only by real shade (a white bar in half light stays white)
+        vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0; Au += underA(q);   // its material colour, darkened only by real shade (a white bar in half light stays white)
         float lOwn = dot(cc.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cc.a);
         // against what is BESIDE it (a board kept in the reference would otherwise be compared with itself)
         vec2 qo = nW*(1.2*vInfo.z*uFocal/max(c.w, 0.05) + 2.0*uK)/uRes; float lBg = 0.0;
         for(int sd=-1; sd<=1; sd+=2){ vec2 qb = q + float(sd)*qo; vec4 bD = texture2D(tData, qb), bC = texture2D(tColor, qb);
-          lBg += 0.5*(bD.a > 0.5 ? dot(bC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*bC.a) : 0.85); }
+          lBg += 0.5*(bD.a > 0.5 ? dot(bC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*bC.a) : 0.85); dPnt -= 0.5*dot(underA(qb), vec3(0.3333)); }
+        dPnt += dot(underA(q), vec3(0.3333)); dRef += log(max(lBg, 0.02)/max(lOwn, 0.02));   // (its contrast to what is beside it: in the subject, and as painted so far)
         cDiff += lOwn - lBg;                               // how it differs from what is behind it (the surfaces are painted without it)
         if(i % 2 == 0){
           float hwE = 0.7*vInfo.z*uFocal/max(c.w, 0.05);
@@ -1126,7 +1133,16 @@ void main(){
       }
       float dk = smoothstep(0.45, 0.20, dot(own, vec3(0.2126,0.7152,0.0722)));   // (only a dark thing gets the firm dark accent)
       col = harmonise(-log(clamp(own, 0.03, 1.0)))*mix(1.0, 1.15, dk) + (uShadow*0.6 + vec3(0.12))*dk + uShadow*0.15*(1.0-dk)*(1.0 - smoothstep(0.55, 0.80, lum3(own)));   // a fine line (a white one stays white)
-      if(formed) col = harmonise(-log(clamp(own, 0.03, 1.0)))*1.05 + uShadow*0.15*(1.0 - smoothstep(0.55, 0.80, lum3(own)));  // a rod, a rib, a pole: its OWN colour; its light and shade come from the profile
+      if(formed) col = harmonise(-log(clamp(own, 0.03, 1.0)))*1.05 + uShadow*0.15*(1.0 - smoothstep(0.55, 0.80, lum3(own)));
+      if(uPaintRef > 0.5 && lw > 0.5){
+        // a DARKER line paints only the contrast still missing against what is beside it (in its own hue); a LIGHTER one
+        // was left as paper by the strokes behind it (reserved) and is painted in its own colour into that hole
+        vec3 At = col*amount; float need = max(dRef/lw, 0.0), have = dPnt/lw, V = max(need - max(have, 0.0), 0.0);
+        col = At/max(dot(At, vec3(0.3333)), 1e-3)*V/0.9;
+        amount = 0.9*smoothstep(0.04, 0.12, V)*smoothstep(0.05, 0.13, abs(cDiff/lw))*uCables;
+        if(cDiff/lw > 0.0){ col = harmonise(-log(clamp(own, 0.03, 1.0)))/0.9; amount = 0.9*smoothstep(0.05, 0.13, cDiff/lw)*uCables; }
+        if(uFadeR > 0.0 && vPos.y <= uFadeY) amount *= 1.0 - smoothstep(0.70, 1.0, length(vPos.xz - uFadeC)/uFadeR);
+      }  // a rod, a rib, a pole: its OWN colour; its light and shade come from the profile
     }
   } else {
     vec2 ndc = vClip.xy/vClip.w; vec2 uv = ndc*0.5+0.5; float vz = vClip.w;
@@ -1378,6 +1394,17 @@ void main(){
       if(isSea){ amount = 0.26*step(0.86, rr.y)*(0.6 + 0.4*rr.w); col = Ab*1.35 + uShadow*0.35;   // a few darker ripples, level and thin
         hw = max(1.2*uK, 0.25*hw); hl = max(hl, 2.2*hlDef); }
       if(texMark > 0.3 && texMark*0.9 >= D - 1e-3) col = harmonise(-log(clamp(rw.rgb*(0.55+0.45*rw.a), 0.03, 1.0)))*1.25;   // a texture mark: its own colour
+      if(uPaintRef > 0.5 && !isSea){                       // the rules above say WHERE a dark goes; how dark = the contrast the paint still
+        vec2 cq = uv + offPx/uRes; float dH = 0.0, dO = 0.0, nO = 0.0;   // lacks: (subject - paint) here minus (subject - paint) around it
+        for(int k=-1;k<=1;k++){ vec2 q = cq + dirT*(float(k)*0.6*hl)/uRes; vec4 rq = texture2D(tRaw,q), lq = texture2D(tColor,q), dq = texture2D(tData,q);
+          dH += dot(-log(clamp(rq.rgb, 0.03, 1.0)) + vec3(shadeA(lq.a, dq.g, texture2D(tLine,q).b, dq.r)) - underA(q), vec3(0.3333))/3.0; }
+        for(int k=0;k<8;k++){ float a = float(k)*0.785398; vec2 q = cq + (dirT*cos(a)*(hl + 2.5*h) + nT*sin(a)*(hw + 2.5*h))/uRes; vec4 dq = texture2D(tData,q);
+          if(dq.a < 0.5) continue; vec4 rq = texture2D(tRaw,q), lq = texture2D(tColor,q);
+          dO += dot(-log(clamp(rq.rgb, 0.03, 1.0)) + vec3(shadeA(lq.a, dq.g, texture2D(tLine,q).b, dq.r)) - underA(q), vec3(0.3333)); nO += 1.0; }
+        float V = max(dH - (nO > 0.5 ? max(dO/nO, 0.0) : 0.0), 0.0);
+        vec3 ownD = harmonise(-log(clamp(texture2D(tRaw, cq).rgb, 0.03, 1.0))); vec3 hueN = mix(ownD/max(dot(ownD, vec3(0.3333)), 1e-3), vec3(1.0), 0.3);
+        col = hueN*V; amount = smoothstep(0.10, 0.40, D)*smoothstep(0.05, 0.15, V);
+      }
       hl = min(hl, hlDef*1.6);
     } else if(layer<4.5){                                 // dry-brush flecks where the picture is busy (grass, leaves, rough stuff)
       amount = 0.75*step(0.45, rr.y)*busy*mix(1.0,0.4,uDetail);
@@ -1574,7 +1601,7 @@ const planScene = new THREE.Scene();
 const planMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
   uniforms:{
-    tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null},
+    tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
     uCamDist:{value:20}, uRefDist:{value:20}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()},
@@ -2669,7 +2696,7 @@ function fit(){
   rtThin.texture[1].minFilter = rtThin.texture[1].magFilter = THREE.NearestFilter;
   aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.tShapeA.value = rtMain.texture[3]; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
   camera.aspect = W/H; camera.updateProjectionMatrix();
-  const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtMain.texture[3]; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.tThinC.value=rtThin.texture[0]; P.tThinD.value=rtThin.texture[1]; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
+  const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtMain.texture[3]; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.tThinC.value=rtThin.texture[0]; P.tThinD.value=rtThin.texture[1]; P.tG0p.value=rtGlaze[0].texture; P.tG1p.value=rtGlaze[1].texture; P.tG2p.value=rtGlaze[2].texture; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
   strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtMain.texture[3]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1];
   const Rz = resolveMat.uniforms; [0,1,2,3].forEach(i=>{ Rz['tG'+i].value = rtGlaze[i].texture; }); Rz.uResI.value.set(W,H); Rz.uKi.value = Math.min(W,H)/700;
   Rz.tShapeR.value = rtMain.texture[3]; Rz.tColorR.value = rtLit.texture; Rz.tDataR.value = rtMain.texture[1]; Rz.tW1.value = rtWet[1].texture[0]; Rz.tW2.value = rtWet[1].texture[1]; Rz.tWF.value = rtWet[1].texture[2];
@@ -2689,7 +2716,7 @@ window.addEventListener('resize', fit);
 const CLEAR_ZERO = new THREE.Color().setRGB(0,0,0);
 const SLIP = [5,-4];
 let __sync = null;                                     // (test hook: timing of each pass)
-let restT = 10, lastV = null, viewSpeed = 0, lastPlanKey = '';            // how long the view has been still (s), and how fast it turns (rad/s)
+let restT = 10, lastV = null, viewSpeed = 0, lastPlanKey = '', planFrame = 0;            // how long the view has been still (s), and how fast it turns (rad/s)
 function render(dt){
   dt = dt === undefined ? 1/60 : dt;
   const fov = camera.fov*Math.PI/180, t = Math.tan(fov/2);
@@ -2705,7 +2732,9 @@ function render(dt){
   // targets, and only the memory, the strokes and the washes run
   const PU = planMat.uniforms, P = PU;
   P.uCull.value = OPT.cull; P.uEarly.value = OPT.early; strokeMat.uniforms.uEarlyS.value = OPT.strokeEarly; wetMat.uniforms.uWetEarly.value = OPT.wetEarly; resolveMat.uniforms.uResDead.value = OPT.resolveDead;
-  const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id].join(',');
+  planFrame++;
+  const key = [view.yaw, view.pitch, view.zoom, current, mood, W, H, quality, loose, PU.uCables.value, PU.uDbgP.value, PU.uDbgR.value, PU.uSizeK.value, OPT.cull, OPT.early, OPT.quad, rtMain.texture[0].id,
+               PU.uPaintRef.value, (PU.uPaintRef.value > 0.5 && (restT < 1.2 || resetStrokes)) ? planFrame : 0].join(',');   // (lines/darks are planned against the paint: replan until it has settled)
   const replan = !OPT.skipPlan || key !== lastPlanKey; lastPlanKey = key;
   if(replan){
   // 1. the 3D picture the painter looks at
@@ -2800,7 +2829,7 @@ fit(); setMood(0,false);
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>canvas.classList.remove('faded'), 80); }
-window.__pavilion = { setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+window.__pavilion = { paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
   passes:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4), f4=new Float32Array(4), acc={}; let t=0;
