@@ -2642,7 +2642,7 @@ void main(){
   // its edges, not holes in it. Paper stays only at real edges, lights left on purpose (their strokes are there, pale)
   // and reserved lights.
   if(uFill > 0.0){
-    float c1h = smoothstep(0.17, 0.35, texture2D(tG1, vUv).a);
+    float c1h = smoothstep(0.17, 0.35, texture2D(tG1, vUv).a + nz);   // (with the same ragged-edge noise as the wash: else a border's noisy gap looked covered — the pale ring round a fur spot)
     if(c1h < 0.9 && covC > 0.5){
       vec3 pg = vec3(0.0); float nr = 0.0, rf = uFillR*uKi;
       for(int i=0;i<8;i++){ float a = float(i)*0.7853982 + 0.2; vec4 g = texture2D(tG1, vUv + vec2(cos(a), sin(a))*rf/uResI);
@@ -2652,7 +2652,7 @@ void main(){
     }
   }
   if(uFill > 0.0 && covC > 0.5){                        // (the same for the SHADE wash: a hole in a shadow, shade all round it)
-    float c2h = smoothstep(0.18, 0.34, texture2D(tG2, vUv).a);
+    float c2h = smoothstep(0.18, 0.34, texture2D(tG2, vUv).a + nz);
     if(c2h < 0.9){
       vec3 pg = vec3(0.0); float nr = 0.0, rf = uFillR*uKi;
       for(int i=0;i<8;i++){ float a = float(i)*0.7853982 + 0.2; vec4 g = texture2D(tG2, vUv + vec2(cos(a), sin(a))*rf/uResI);
@@ -3503,7 +3503,7 @@ const MODELS = {
   moomin:  { root:()=>moominGroup, yaw:0.70, pitch:0.38, fit:0.88, shadeK:1.3, load:()=>loadPack('moomin', 'moomin_house', moominGroup, { ground:true, lift:1.4, planks:{ col:[50,80,120], tol:0.30, w:0.30, paint:[58,92,138] } }) },
   bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup, { plate:{ col:[230,169,118], base:[97,63,41], r:5.6 } }) },
   cats:    { root:()=>catsGroup, fade:{ c:new THREE.Vector2(0,0), r:9.5, y:-2.0 },   // (the meadow fades into the paper at its edge)
-            yaw:0.10, pitch:0.26, target:new THREE.Vector3(0,-0.4,0), halfW:4.6, halfH:3.3,   // (framed on the CATS, not their meadow: zoom works as in the other paintings)
+            yaw:0.10, pitch:0.26, target:new THREE.Vector3(0,0.3,0), halfW:3.9, halfH:2.8,   // (framed on the CATS, not their meadow: zoom works as in the other paintings)
             shadeK:1.0, marks:1.0, colK:0.6, coarseMin:0, coarseK:0, shadowOwn:0.75,    // (soft round animals: painted wet, shade in their own colour)   // (its fur patches are its pattern: kept, not averaged away)
             zoomMin:0.75, zoomMax:2.2, load:()=>loadPack('cats', 'cats', catsGroup, { areaPow:0.55, skyK:1.6, features:{ whisker:1.3, maxLen:1.5, eyeMax:0.25 }, ground:{ y:-2.19, c:[0,0], r:11, col:[150,172,108], grass:0.9 }, groundBushes:{ n:46, s:0.55, col:[88,122,62], on:[150,172,108], avoid:{ c:[0,0], r:5.2 }, within:{ c:[0,0], r:7.6 } } }) },
   medieval:{ root:()=>medievalGroup, target:new THREE.Vector3(-0.25,1.30,-0.20), halfW:2.3, halfH:2.0, yaw:0.35, pitch:0.90, shadeK:1.4, strokeK:0.55, shadowHalf:4.2, shadowCenter:new THREE.Vector3(-0.25,0.4,-0.25),   // (the shadow map on the hill and castle, not the painted ground round it: 2x finer, no blocky shade)
