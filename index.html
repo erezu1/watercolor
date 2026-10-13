@@ -312,7 +312,7 @@ const OPT = window.__OPT = Object.assign({ quad:1, cull:1, early:1, sort:1, skip
 const PHONE = (()=>{ try{ return matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) < 900; }catch(e){ return false; } })();
 const QS = new URLSearchParams(location.search);
 if(OPT.halfPlan === undefined) OPT.halfPlan = PHONE ? 1 : 0;   // (every phone: confirmed smooth on the user's phone; n: n light frames per full plan)
-if(OPT.fence === undefined) OPT.fence = 0;   // (n: at most n frames queued on the GPU; 1 measured worse on the phone: mean 42-52 ms vs 32-37)
+if(OPT.fence === undefined) OPT.fence = PHONE ? 2 : 0;   // (n: at most n frames queued on the GPU. Phone, measured: 2 = same mean as none, but no 100+ ms stalls; 1 = slower)
 if(OPT.settleEvery === undefined) OPT.settleEvery = PHONE ? 2 : 1;   // (while strokes settle, the plan follows the paint every n-th frame)   // (while the view moves, the full plan every other frame; the anchors every frame)
 
 let renderer;
