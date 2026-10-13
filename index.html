@@ -1264,7 +1264,7 @@ float simAt(vec4 c, vec4 d, vec4 e, vec3 g0, float s0, float z0, vec4 e0, float 
   float shp = max(max(same, alike), alikeL);
   if(mode > 0.99){                                      // the shadow passage: one value band across neighbouring pieces
     float simzF = 1.0-smoothstep(0.30*gZS, 0.70*gZS, abs(d.b*uDepthRange-z0));
-    return d.a*simzF*(1.0-smoothstep(0.10, 0.22, abs(modelV(c.a, d.g)-modelV(s0, cS0))));
+    return d.a*simzF*(1.0-smoothstep(0.10, 0.22, abs(modelV(c.a, d.g)-modelV(s0, cS0))))*mix(1.0, simc, step(0.01, uShadowOwn));   // (shade in the fur's OWN colour stops at the fur's colour borders: a calico's spot kept no orange fringe)
   }
   float sims = mode > 0.99 ? 1.0-smoothstep(0.35, 0.65, abs(inShade(c.a)-inShade(s0))) : 1.0-smoothstep(tol*0.9, tol*1.7, abs(c.a-s0));
   return d.a*shp*simz*mix(simc, sims, mode);
@@ -2644,6 +2644,16 @@ void main(){
         float c = step(0.30, g.a); pg += c*g.rgb/max(g.a, 1e-3); nr += c; }
       float hole = (1.0 - c1h)*smoothstep(5.5, 7.5, nr)*(1.0 - rvC);
       if(hole > 0.0) A1 += uFill*hole*pg/max(nr, 1.0);
+    }
+  }
+  if(uFill > 0.0 && covC > 0.5){                        // (the same for the SHADE wash: a hole in a shadow, shade all round it)
+    float c2h = smoothstep(0.18, 0.34, texture2D(tG2, vUv).a);
+    if(c2h < 0.9){
+      vec3 pg = vec3(0.0); float nr = 0.0, rf = uFillR*uKi;
+      for(int i=0;i<8;i++){ float a = float(i)*0.7853982 + 0.2; vec4 g = texture2D(tG2, vUv + vec2(cos(a), sin(a))*rf/uResI);
+        float c = step(0.30, g.a); pg += c*g.rgb/max(g.a, 1e-3); nr += c; }
+      float hole = (1.0 - c2h)*smoothstep(5.5, 7.5, nr)*(1.0 - rvC);
+      if(hole > 0.0) A2 += uFill*hole*pg/max(nr, 1.0);
     }
   }   // (at a reserved light's edge its own paint (the ladder) and the wall's never stack: brown over blue is black)
   if(uSolo > 4.5 && uSolo < 5.5){ oAbs = vec4(vec3(1.0-wf.r, 1.0-wf.g, 1.0)*1.5, rawNow); return; }   // debug: where the paint is wet
