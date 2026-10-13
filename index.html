@@ -1948,6 +1948,7 @@ void main(){
     if(step(0.25, texture(tShape, uv).z) < 0.5 && d.a > 0.5 && c.w - z0 < 0.5*gZS) vis = max(vis, smoothstep(-0.05, 0.40, abs(ndv)));
     if(!(abs(ndc.x) < 1.15 && abs(ndc.y) < 1.15 && c.w > 0.0)) vis = 0.0;
   }
+  if(prev.z <= 0.0) vis = 0.0;   // (a stroke the last plan had hidden has no path yet: it waits for the next full plan)
   oA = vec4(uv*uRes, vis, prev.w);
   vec2 off = uv*uRes - prev.xy; if(length(off) < 400.0) oG.xy += off;
 }`;
@@ -3435,7 +3436,7 @@ function render(dt){
   if(light){ const A = anchMat.uniforms, M = strokeMeshes[current];
     A.tA0.value = M.attrTex[0]; A.tA1.value = M.attrTex[1]; A.tA4.value = M.attrTex[4]; A.tP4.value = rtPlan.texture[4]; A.tP0.value = rtPlan.texture[0]; A.tData.value = rtMain.texture[1]; A.tShape.value = rtMain.texture[3];
     A.uProj.value.copy(camera.projectionMatrix); A.uNT.value = M.total; A.uDYaw.value = view.yaw - lastFullPlan.yaw; A.uDPitch.value = view.pitch - lastFullPlan.pitch; A.uAspect.value = W/H; A.uRes.value.set(W,H);
-    renderer.setRenderTarget(rtAnch); renderer.render(anchScene, postCam);
+    renderer.setRenderTarget(rtAnch); renderer.render(anchScene, camera);   // (the scene camera: its viewMatrix and cameraPosition)
   } else {
   renderer.setRenderTarget(rtPlan); renderer.setClearColor(CLEAR_ZERO, 0); renderer.render(OPT.quad ? planQScene : planScene, camera);
   lastFullPlan = { yaw:view.yaw, pitch:view.pitch };
