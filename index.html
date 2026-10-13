@@ -1366,11 +1366,11 @@ void main(){
       if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < max(tolZ, 2.2*vInfo.z + 0.008)){   // (a wide piece's surface is far from its centre line: the chimney)
         vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0; Au += underA(q); lcm += cc.rgb;   // its material colour, darkened only by real shade (a white bar in half light stays white)
         float lOwn = dot(cc.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cc.a);
-        { vec4 mC = texture2D(tColor, q); vec3 cm = d.a > 0.5 ? mC.rgb : vec3(0.85), r3 = max((cc.rgb + 0.04)/(cm + 0.04), (cc.rgb*(0.35+0.65*cc.a) + 0.03)/((d.a > 0.5 ? mC.rgb*(0.35+0.65*mC.a) : vec3(0.85)) + 0.03));   // (the SAME test as the strokes'
+        { vec4 mC = texture2D(tRaw, q); vec3 cm = d.a > 0.5 ? mC.rgb : vec3(0.85), r3 = max((cc.rgb + 0.04)/(cm + 0.04), (cc.rgb*(0.35+0.65*cc.a) + 0.03)/((d.a > 0.5 ? mC.rgb*(0.35+0.65*mC.a) : vec3(0.85)) + 0.03));   // (the SAME test as the strokes'
           rS += (d.a > 0.5 && dT.b > d.b + 0.002) ? 0.0 : smoothstep(1.15, 1.45, max(r3.r, max(r3.g, r3.b))); }        // reserve, STROKE_FS reserveAt)
         // against what is BESIDE it (a board kept in the reference would otherwise be compared with itself)
         vec2 qo = nW*(1.2*vInfo.z*uFocal/max(c.w, 0.05) + 2.0*uK)/uRes; float lBg = 0.0;
-        for(int sd=-1; sd<=1; sd+=2){ vec2 qb = q + float(sd)*qo; vec4 bD = texture2D(tData, qb), bC = texture2D(tColor, qb);
+        for(int sd=-1; sd<=1; sd+=2){ vec2 qb = q + float(sd)*qo; vec4 bD = texture2D(tData, qb), bC = texture2D(tRaw, qb);   // (raw: the reference is averaged at the brush's scale, and against that every roof piece stood out)
           lBg += 0.5*(bD.a > 0.5 ? dot(bC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*bC.a) : 0.85); dPnt -= 0.5*dot(underA(qb), vec3(0.3333)); }
         dPnt += dot(underA(q), vec3(0.3333)); dRef += log(max(lBg, 0.02)/max(lOwn, 0.02));   // (its contrast to what is beside it: in the subject, and as painted so far)
         cDiff += lOwn - lBg;                               // how it differs from what is behind it (the surfaces are painted without it)
@@ -1474,7 +1474,15 @@ void main(){
     // a TEXTURE MARK (lettering, stripes, a symbol on a sign): the object's own unsoftened texture is clearly darker here
     // than the object around it. The darks glaze draws it, in its own colour, following the mark (not the softened colour)
     vec4 rw = texture2D(tRaw, uv);
-    float texMark = (layer > 2.5 && layer < 3.5) ? smoothstep(0.78, 0.55, dot(rw.rgb, vec3(0.2126,0.7152,0.0722))/max(dot(c0.rgb, vec3(0.2126,0.7152,0.0722)), 1e-3))*hasShape(e0) : 0.0;
+    // (a texture mark is darker than its CLOSE surroundings in the raw picture — not than the reference colour, which is
+    // averaged at the brush's scale: against that every dark joint between roof tiles became a mark)
+    float lRef = 0.0;
+    if(layer > 2.5 && layer < 3.5){                       // (the old reference: the raw colour softened over ~2.6 px, within the shape)
+      float Rr = 2.6*min(uRes.x, uRes.y)/700.0, wr = 1.0; lRef = dot(rw.rgb, vec3(0.2126,0.7152,0.0722));
+      for(int i=0;i<10;i++){ float a = float(i)*2.3999632 + 0.5, r = Rr*sqrt((float(i)+0.5)/10.0); vec2 q = uv + vec2(cos(a), sin(a))*r/uRes;
+        float w = sameShape(texture2D(tShape, q), e0)*texture2D(tData, q).a; lRef += w*dot(texture2D(tRaw, q).rgb, vec3(0.2126,0.7152,0.0722)); wr += w; }
+      lRef /= wr; }
+    float texMark = (layer > 2.5 && layer < 3.5) ? smoothstep(0.78, 0.55, dot(rw.rgb, vec3(0.2126,0.7152,0.0722))/max(lRef, 1e-3))*hasShape(e0) : 0.0;
     if(texMark > 0.3) g0 = sqrt(rw.rgb);
     float cast0 = texture2D(tData, uv).g; cS0 = cast0;
     float tolBase = layer<0.5 ? mix(0.30, 0.22, uDetail) : layer<1.5 ? 0.16 : layer<2.5 ? 0.15 : layer<3.5 ? 0.12 : 0.09;
@@ -1778,10 +1786,10 @@ void main(){
       if(texMark > 0.3 && texMark*0.9 >= D - 1e-3) col = harmonise(-log(clamp(rw.rgb*(0.55+0.45*rw.a), 0.03, 1.0)))*1.25;   // a texture mark: its own colour
       if(uPaintRef > 0.5 && !isSea){                       // the rules above say WHERE a dark goes; how dark = the contrast the paint still
         vec2 cq = uv + offPx/uRes; float dH = 0.0, dO = 0.0, nO = 0.0;   // lacks: (subject - paint) here minus (subject - paint) around it
-        for(int k=-1;k<=1;k++){ vec2 q = cq + dirT*(float(k)*0.6*hl)/uRes; vec4 rq = texture2D(tRaw,q), lq = texture2D(tColor,q), dq = texture2D(tData,q);
+        for(int k=-1;k<=1;k++){ vec2 q = cq + dirT*(float(k)*0.6*hl)/uRes; vec4 lq = texture2D(tColor,q), rq = lq, dq = texture2D(tData,q);   // (against the reference AS PAINTED — averaged at the brush's scale — not the raw texture: its every tile joint read as missing contrast)
           dH += dot(-log(clamp(rq.rgb, 0.03, 1.0)) + vec3(shadeA(lq.a, dq.g, texture2D(tLine,q).b, dq.r)) - underA(q), vec3(0.3333))/3.0; }
         for(int k=0;k<8;k++){ float a = float(k)*0.785398; vec2 q = cq + (dirT*cos(a)*(hl + 2.5*h) + nT*sin(a)*(hw + 2.5*h))/uRes; vec4 dq = texture2D(tData,q);
-          if(dq.a < 0.5) continue; vec4 rq = texture2D(tRaw,q), lq = texture2D(tColor,q);
+          if(dq.a < 0.5) continue; vec4 lq = texture2D(tColor,q), rq = lq;
           dO += dot(-log(clamp(rq.rgb, 0.03, 1.0)) + vec3(shadeA(lq.a, dq.g, texture2D(tLine,q).b, dq.r)) - underA(q), vec3(0.3333)); nO += 1.0; }
         float V = max(dH - (nO > 0.5 ? max(dO/nO, 0.0) : 0.0), 0.0);
         vec3 ownD = harmonise(-log(clamp(texture2D(tRaw, cq).rgb, 0.03, 1.0))); vec3 hueN = mix(ownD/max(dot(ownD, vec3(0.3333)), 1e-3), vec3(1.0), 0.3);
@@ -1916,7 +1924,7 @@ const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform float uPixShade, uDomK, uRimK, uResvOn;
+uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uPixShade, uDomK, uRimK, uResvOn;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -1932,7 +1940,7 @@ float pixShade(vec2 q){
 float reserveAt(vec2 q){
   vec4 tD = texture2D(tThinDS, q); if(tD.a < 0.5) return 0.0;
   vec4 mD = texture2D(tDataS, q); if(mD.a > 0.5 && tD.b > mD.b + 0.002) return 0.0;
-  vec4 tC = texture2D(tThinCS, q), mC = texture2D(tLitS, q);
+  vec4 tC = texture2D(tThinCS, q), mC = texture2D(tRawS, q);   // (raw: the reference is averaged at the brush's scale)
   // (by the materials' own colours, not their lit brightness: a light thing on a dark wall is painted around along its
   // whole length, in light and in shade — compared lit, a ladder in shade was not, and brown over blue went black)
   // (CHANNEL BY CHANNEL: a thing is reserved when any of its colours is clearly lighter than what is behind — a red rail
@@ -2131,7 +2139,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uResvOn:{value:1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uResvOn:{value:1}, tRawS:{value:null}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -2395,11 +2403,11 @@ vec3 octDec(vec2 e){ e = e*2.0-1.0; vec3 n = vec3(e, 1.0-abs(e.x)-abs(e.y)); flo
   n.x += n.x >= 0.0 ? -t : t; n.y += n.y >= 0.0 ? -t : t; return normalize(n); }
 float mv(float s, float cst){ float sh = 1.0-smoothstep(0.05, 0.14, s); return (sh + 0.18*(1.0-smoothstep(0.30, 0.70, s))*(1.0-sh))*(1.0 + 0.45*cst); }
 float hashW(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
-uniform sampler2D tThinC; uniform sampler2D tThinD;
+uniform sampler2D tThinC; uniform sampler2D tThinD; uniform sampler2D tRawW;
 float resW(vec2 q){                                       // (the reserved lights of thin things: no paint flows into them)
   vec4 tD = texture(tThinD, q); if(tD.a < 0.5) return 0.0;
   vec4 mD = texture(tData, q); if(mD.a > 0.5 && tD.b > mD.b + 0.002) return 0.0;
-  vec4 tC = texture(tThinC, q), mC = texture(tColor, q);
+  vec4 tC = texture(tThinC, q), mC = texture(tRawW, q);
   vec3 cm = mD.a > 0.5 ? mC.rgb : vec3(0.85), r3 = (tC.rgb + 0.04)/(cm + 0.04);   // (as reserveAt)
   r3 = max(r3, (tC.rgb*(0.35+0.65*tC.a) + 0.03)/((mD.a > 0.5 ? mC.rgb*(0.35+0.65*mC.a) : vec3(0.85)) + 0.03));
   return step(1.3, max(r3.r, max(r3.g, r3.b)));
@@ -2701,7 +2709,7 @@ const mergeMat = new THREE.ShaderMaterial({ uniforms:{ tShapeM:{value:null}, tDa
 const mergeScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), mergeMat); q.frustumCulled=false; mergeScene.add(q); }
 const wetMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
-  uniforms:{ tA:{value:null}, tB:{value:null}, tF:{value:null}, tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tThinC:{value:null}, tThinD:{value:null}, uStep:{value:new THREE.Vector2()}, uDR:SHARED.uDepthRange, uFirst:{value:1}, uWetEarly:{value:1}, uWetRel:{value:1}, uPaintStop:{value:1} },
+  uniforms:{ tA:{value:null}, tB:{value:null}, tF:{value:null}, tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tRawW:{value:null}, uStep:{value:new THREE.Vector2()}, uDR:SHARED.uDepthRange, uFirst:{value:1}, uWetEarly:{value:1}, uWetRel:{value:1}, uPaintStop:{value:1} },
   vertexShader:QUAD_VS, fragmentShader:WET_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending
 });
 const wetScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), wetMat); q.frustumCulled=false; wetScene.add(q); }
@@ -3320,7 +3328,7 @@ const MODELS = {
                // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
             
              pitchMin:0.25,   // (its hill stands in a painted ground, so the camera may circle low; not lower than this: the ground's far edge)
-             fade:{ c:new THREE.Vector2(-0.25,-0.26), r:4.6, y:1.25 }, load:()=>loadPack('medieval', 'medieval', medievalGroup, { lift:(window.__OPT && window.__OPT.medLift) || 1.15, blocks:{ col:[212,196,168], tol:0.06, size:[0.62,0.30] }, areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6, c:[-0.25,-0.26], r:4.4, col:[176,190,118], skirt:{ cols:[[124,90,64],[176,190,118]], tol:0.16, wall:[124,90,64], slope:0, amp:0.10 }, foot:{ stone:[132,104,84], nStones:40, sStone:0.09, bush:[86,118,58], nBushes:70, sBush:0.11 } }, stones:{ n:80, s:0.06, col:[132,104,84], on:[176,190,118] }, bushes:{ n:300, s:0.10, col:[86,118,58], on:[176,190,118] }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
+             fade:{ c:new THREE.Vector2(-0.25,-0.26), r:4.6, y:1.25 }, coverC:4.5, load:()=>loadPack('medieval', 'medieval', medievalGroup, { lift:(window.__OPT && window.__OPT.medLift) || 1.15, blocks:{ col:[212,196,168], tol:0.06, size:[0.62,0.30] }, areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6, c:[-0.25,-0.26], r:4.4, col:[176,190,118], skirt:{ cols:[[124,90,64],[176,190,118]], tol:0.16, wall:[124,90,64], slope:0, amp:0.10 }, foot:{ stone:[132,104,84], nStones:40, sStone:0.09, bush:[86,118,58], nBushes:70, sBush:0.11 } }, stones:{ n:80, s:0.06, col:[132,104,84], on:[176,190,118] }, bushes:{ n:300, s:0.10, col:[86,118,58], on:[176,190,118] }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
   castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, pitchMax:1.05,   // (from above it has no sky under it: bare paper)
             target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:2.0, strokeK:0.55, coarseMin:0.4, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6, lift:1.15, around:true}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
 };
@@ -3588,10 +3596,10 @@ function fit(){
   aoMat.uniforms.tColor.value = rtMain.texture[0]; aoMat.uniforms.tData.value = rtMain.texture[1]; aoMat.uniforms.tShapeA.value = rtShapeM.texture; aoMat.uniforms.uResI.value.set(W,H); aoMat.uniforms.uKi.value = Math.min(W,H)/700;
   camera.aspect = W/H; camera.updateProjectionMatrix();
   const P = planMat.uniforms; P.tColor.value=rtLit.texture; P.tData.value=rtMain.texture[1]; P.tShape.value=rtShapeM.texture; P.tLine.value=rtMain.texture[2]; P.tRaw.value=rtMain.texture[0]; P.tThinC.value=rtThin.texture[0]; P.tThinD.value=rtThin.texture[1]; P.tG0p.value=rtGlaze[0].texture; P.tG1p.value=rtGlaze[1].texture; P.tG2p.value=rtGlaze[2].texture; P.uRes.value.set(W,H); P.uK.value = Math.min(W,H)/700;
-  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtShapeM.texture; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1]; strokeMat.uniforms.tLineS.value = rtMain.texture[2];
+  strokeMat.uniforms.uRes.value.set(W,H); strokeMat.uniforms.tShapeS.value = rtShapeM.texture; strokeMat.uniforms.tRawS.value = rtMain.texture[0]; strokeMat.uniforms.tLitS.value = rtLit.texture; strokeMat.uniforms.tDataS.value = rtMain.texture[1]; strokeMat.uniforms.tThinCS.value = rtThin.texture[0]; strokeMat.uniforms.tThinDS.value = rtThin.texture[1]; strokeMat.uniforms.tLineS.value = rtMain.texture[2];
   const Rz = resolveMat.uniforms; [0,1,2,3].forEach(i=>{ Rz['tG'+i].value = rtGlaze[i].texture; }); Rz.uResI.value.set(W,H); Rz.uKi.value = Math.min(W,H)/700;
   Rz.tShapeR.value = rtMain.texture[3]; Rz.tColorR.value = rtLit.texture; Rz.tDataR.value = rtMain.texture[1]; Rz.tW1.value = rtWet[1].texture[0]; Rz.tW2.value = rtWet[1].texture[1]; Rz.tWF.value = rtWet[1].texture[2];
-  wetMat.uniforms.tColor.value = rtLit.texture; wetMat.uniforms.tData.value = rtMain.texture[1]; wetMat.uniforms.tShape.value = rtShapeM.texture; wetMat.uniforms.tThinC.value = rtThin.texture[0]; wetMat.uniforms.tThinD.value = rtThin.texture[1];
+  wetMat.uniforms.tColor.value = rtLit.texture; wetMat.uniforms.tData.value = rtMain.texture[1]; wetMat.uniforms.tShape.value = rtShapeM.texture; wetMat.uniforms.tRawW.value = rtMain.texture[0]; wetMat.uniforms.tThinC.value = rtThin.texture[0]; wetMat.uniforms.tThinD.value = rtThin.texture[1];
   const F = finalMat.uniforms;
   F.tShapeF.value=rtMain.texture[3]; F.tLitF.value=rtLit.texture; F.tThinCF.value=rtThin.texture[0]; F.tThinDF.value=rtThin.texture[1]; F.tColor.value=rtMain.texture[0]; F.tData.value=rtMain.texture[1]; F.tLine.value=rtMain.texture[2];
   resetStrokes = true;
@@ -3846,6 +3854,7 @@ window.__pavilion = { rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }
     return r; },
   // (test) the plan's strokes, read back: for comparing two close views stroke by stroke
   dbgR:(v)=>{ planMat.uniforms.uDbgR.value = v; },
+  infoRead:()=>strokeMeshes[current].attrTex[4].image.data,   // (test: each stroke's layer, kind, …)
   planRead:()=>{ const gl=renderer.getContext(), n=STATE_S*STATE_S, out=[];
     for(let i=0;i<5;i++){ const b=new Float32Array(n*4); renderer.setRenderTarget(rtPlan); gl.readBuffer(gl.COLOR_ATTACHMENT0+i); gl.readPixels(0,0,STATE_S,STATE_S,gl.RGBA,gl.FLOAT,b); out.push(b); }
     gl.readBuffer(gl.COLOR_ATTACHMENT0); renderer.setRenderTarget(null); return out; },
