@@ -176,7 +176,7 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 </div>
 <div class="toast" id="toast"></div>
 <button class="pick-btn" id="pickBtn" aria-expanded="false" aria-controls="picker" aria-label="Choose a painting">
-  <svg viewBox="0 0 24 24" aria-hidden="true"><g class="i-open"><rect x="3" y="4" width="18" height="16" rx="1.2"/><rect x="6" y="7" width="12" height="10" rx=".4"/><path d="M6.6 16.4l3.6-4.1 2.6 2.8 1.7-1.8 2.9 3.1"/><circle class="dot" cx="14.6" cy="9.9" r="1.15"/></g><path class="i-close" d="M7 7l10 10M17 7L7 17"/></svg>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><g class="i-open"><path d="M8.7 21 10.2 9.4h3.6L15.3 21z"/><path d="M8.1 9.4h7.8M9.4 15.2h5.2"/><path d="M10.4 9.4V5.8h3.2v3.6"/><path d="M9.8 5.8 12 3l2.2 2.8z"/><path d="M4 21h16M7.6 7.2 5.2 6.2M16.4 7.2l2.4-1"/></g><path class="i-close" d="M7 7l10 10M17 7L7 17"/></svg>
 </button>
 <div class="panel picker" id="picker" role="dialog" aria-label="Choose a painting" hidden>
   <h2>Paintings</h2>
@@ -1077,7 +1077,7 @@ void main(){
     // reflected light on its far side (three values across the stroke, as the graded modelling strokes have)
     vec2 P0 = vClip.xy/max(vClip.w,1e-3), P1 = vClip2.xy/max(vClip2.w,1e-3);
     vec2 dW = (P1-P0)*uRes; vec2 nW = length(dW) > 1e-3 ? vec2(-dW.y, dW.x)/length(dW) : vec2(0.0);
-    vec3 pr0 = vec3(0.0), pr1 = vec3(0.0), pr2 = vec3(0.0); float pn = 0.0; vec3 Au = vec3(0.0); float dRef = 0.0, dPnt = 0.0;
+    vec3 pr0 = vec3(0.0), pr1 = vec3(0.0), pr2 = vec3(0.0); float pn = 0.0; vec3 Au = vec3(0.0); float dRef = 0.0, dPnt = 0.0, rS = 0.0;
     for(int i=0;i<=16;i++){
       vec4 c = mix(vClip, vClip2, float(i)/16.0);
       vec2 q = c.xy/max(c.w,1e-3)*0.5+0.5;
@@ -1088,6 +1088,8 @@ void main(){
       if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < max(tolZ, 2.2*vInfo.z + 0.008)){   // (a wide piece's surface is far from its centre line: the chimney)
         vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0; Au += underA(q);   // its material colour, darkened only by real shade (a white bar in half light stays white)
         float lOwn = dot(cc.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cc.a);
+        { vec4 mC = texture2D(tColor, q); float lm = d.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722)) : 0.85;   // (the SAME test as the strokes'
+          rS += (d.a > 0.5 && dT.b > d.b + 0.002) ? 0.0 : smoothstep(1.15, 1.45, dot(cc.rgb, vec3(0.2126,0.7152,0.0722))/max(lm, 0.02)); }   // reserve, STROKE_FS reserveAt)
         // against what is BESIDE it (a board kept in the reference would otherwise be compared with itself)
         vec2 qo = nW*(1.2*vInfo.z*uFocal/max(c.w, 0.05) + 2.0*uK)/uRes; float lBg = 0.0;
         for(int sd=-1; sd<=1; sd+=2){ vec2 qb = q + float(sd)*qo; vec4 bD = texture2D(tData, qb), bC = texture2D(tColor, qb);
@@ -1140,7 +1142,10 @@ void main(){
         vec3 At = col*amount; float need = max(dRef/lw, 0.0), have = dPnt/lw, V = max(need - max(have, 0.0), 0.0);
         col = At/max(dot(At, vec3(0.3333)), 1e-3)*V/0.9;
         amount = 0.9*smoothstep(0.04, 0.12, V)*smoothstep(0.05, 0.13, abs(cDiff/lw))*uCables;
-        if(cDiff/lw > 0.0){ col = harmonise(-log(clamp(own, 0.03, 1.0)))/0.9; amount = 0.9*smoothstep(0.05, 0.13, cDiff/lw)*uCables; }
+        if(rS/lw > 0.3){ col = harmonise(-log(clamp(own, 0.03, 1.0)))/0.9; amount = 0.9*uCables;   // (left as paper behind it: fill that hole)
+          // (the strokes behind left the thing's exact silhouette as paper: this line is drawn wider and cut to that hole,
+          // so it fills it — drawn at its own width it left white slivers beside it and went dark where it missed: the ladder)
+          hw = hw*1.6 + 1.5*uK; ramp = vec4(1.0, 1.0, 0.0, 2.0); }
         if(uFadeR > 0.0 && vPos.y <= uFadeY) amount *= 1.0 - smoothstep(0.70, 1.0, length(vPos.xz - uFadeC)/uFadeR);
       }  // a rod, a rib, a pole: its OWN colour; its light and shade come from the profile
     }
@@ -1539,6 +1544,7 @@ void main(){
   float cutOn = uCut*step(0.25, eM.z)*((layer > 0.5 && layer < 1.5) || (layer > 1.5 && layer < 2.5 && vRamp.z > 0.5) ? 1.0 : 0.0);
   if(layer > 1.5 && layer < 2.5 && vRamp.z < 0.5) cutOn = 2.0*uCut;   // the shadow passage: cut to the SHADE (it stops where the light starts)
   vShp = vec3(eM.zw, cutOn);
+  if(layer > 4.5 && layer < 5.5 && rBox.w > 1.5) vShp.z = 3.0;   // a LIGHT thin thing's line: cut to its reserved hole (STROKE_FS)
   vRes = (layer > 4.5 && layer < 5.5) ? 0.0 : 1.0;       // every stroke but a thin thing's own line keeps off the lighter thin things
   { vec4 cM = texture2D(tLitS, (a.xy + arcOff(a.z, a.w, 0.5*(s0+s1)))/uRes);
     vLum = vec2(dot(cM.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cM.a), step(0.25, eM.z)*vRes); }   // (its own value, for painting around lighter things)
@@ -1554,9 +1560,10 @@ float reserveAt(vec2 q){
   vec4 tD = texture2D(tThinDS, q); if(tD.a < 0.5) return 0.0;
   vec4 mD = texture2D(tDataS, q); if(mD.a > 0.5 && tD.b > mD.b + 0.002) return 0.0;
   vec4 tC = texture2D(tThinCS, q), mC = texture2D(tLitS, q);
-  float lt = dot(tC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*tC.a);
-  float lm = mD.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*mC.a) : 0.85;
-  return smoothstep(0.05, 0.13, lt - lm);
+  // (by the materials' own colours, not their lit brightness: a light thing on a dark wall is painted around along its
+  // whole length, in light and in shade — compared lit, a ladder in shade was not, and brown over blue went black)
+  float lt = dot(tC.rgb, vec3(0.2126,0.7152,0.0722)), lm = mD.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722)) : 0.85;
+  return smoothstep(1.15, 1.45, lt/max(lm, 0.02));
 }
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 float vn(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);
@@ -1584,6 +1591,12 @@ void main(){
     }
   }
   if(uEarlyS > 0.5 && a <= 0.0){ gl_FragColor = vec4(0.0); return; }
+  if(vShp.z > 2.5){                                      // a light thin thing's line fills exactly the hole left for it
+    float hole = 0.0;
+    for(int k=0;k<4;k++){ vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
+      hole += 0.25*reserveAt((gl_FragCoord.xy + o*1.6)/uRes); }
+    a *= hole;
+  } else
   if(vShp.z > 1.5){                                      // a shadow is a shape: paint where there is shade, on the model
     float sh = 0.0;
     for(int k=0;k<4;k++){
@@ -1940,9 +1953,8 @@ float resW(vec2 q){                                       // (the reserved light
   vec4 tD = texture(tThinD, q); if(tD.a < 0.5) return 0.0;
   vec4 mD = texture(tData, q); if(mD.a > 0.5 && tD.b > mD.b + 0.002) return 0.0;
   vec4 tC = texture(tThinC, q), mC = texture(tColor, q);
-  float lt = dot(tC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*tC.a);
-  float lm = mD.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*mC.a) : 0.85;
-  return step(0.09, lt - lm);
+  float lt = dot(tC.rgb, vec3(0.2126,0.7152,0.0722)), lm = mD.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722)) : 0.85;   // (as reserveAt)
+  return step(1.3, lt/max(lm, 0.02));
 }
 void main(){
   vec4 d0 = texture(tData, vUv), e0 = texture(tShape, vUv), c0 = texture(tColor, vUv); vec3 g0 = sqrt(c0.rgb);
