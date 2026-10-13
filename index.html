@@ -166,11 +166,11 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 </head>
 <body>
 <div id="sheet">
-  <canvas id="c" tabindex="0" aria-label="A domed pavilion painted in watercolour. Drag to turn it, pinch to zoom."></canvas>
+  <canvas id="c" tabindex="0" aria-label="A domed pavilion painted in watercolour. Drag to rotate the painting, pinch to zoom."></canvas>
   <div class="hint" id="hint" aria-hidden="true">
     <svg viewBox="0 0 120 56"><path class="hint-arc" d="M18 30 Q60 6 102 30"/><path class="hint-arr" d="M26 21 L16 31 L29 35"/><path class="hint-arr" d="M94 21 L104 31 L91 35"/>
       <g class="hint-hand"><circle cx="60" cy="38" r="7"/><circle cx="60" cy="38" r="13" class="hint-ring"/></g></svg>
-    <span>Drag to turn it</span>
+    <span>Drag to rotate the painting</span>
   </div>
   <div class="fail" id="fail">This painting needs WebGL 2, which your browser doesn’t seem to offer.</div>
 </div>
@@ -195,7 +195,6 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
     <span>Hold to see the model underneath</span>
   </button>
-  <p class="about">Painted live from a 3D model, stroke by stroke. Drag to turn it; the painting follows.</p>
 </div>
 
 <script>
@@ -459,11 +458,30 @@ add(new THREE.SphereGeometry(1.82,56,26,0,Math.PI*2,0,Math.PI/2),'dome',0,2.5,0,
 add(CYL(0.2,0.25,0.44,20),'stone',0,4.04,0);
 add(new THREE.ConeGeometry(0.28,0.4,20),'gold',0,4.46,0);
 add(new THREE.SphereGeometry(0.075,14,10),'gold',0,4.72,0);
-[[-2.55,0.6,1.0],[-2.25,-1.0,1.35],[2.65,-0.5,1.15],[2.25,1.25,0.8]].forEach(([x,z,s])=>{
-  add(new THREE.SphereGeometry(1,22,16),'tree',x,s*1.2,z,0.36*s,1.2*s,0.36*s);
+// TREES WITH A SHAPE OF THEIR OWN (user: "so they won't look like exact ellipses"): each crown is a sphere pushed in and
+// out by a few broad lumps (its own seed), and a cypress tapers to a flame-like point; normals follow, so the light
+// breaks across the lumps
+function lumpy(geo, seed, amp, freq, taper){
+  const p = geo.attributes.position, v = new THREE.Vector3(), rg = mulberry32(seed), W = [];
+  for(let k=0;k<6;k++){ const d = new THREE.Vector3(rg()*2-1, rg()*2-1, rg()*2-1).normalize(); W.push([d, freq*(0.7+0.6*rg()), rg()*6.283, 1/(1+k*0.45)]); }
+  for(let i=0;i<p.count;i++){
+    v.fromBufferAttribute(p,i); const u = v.clone().normalize(); let n = 0, w = 0;
+    for(const [d,f,ph,a] of W){ n += a*Math.sin(f*u.dot(d)*3.0 + ph); w += a; }
+    let r = 1 + amp*n/w;
+    if(taper) r *= 1 - taper*Math.max(0, u.y)*Math.max(0, u.y);          // (a cypress: narrowing to its top)
+    v.multiplyScalar(r); p.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  const nr = geo.attributes.normal, key = i => [p.getX(i),p.getY(i),p.getZ(i)].map(x=>Math.round(x*1e4)).join(','), acc = new Map();
+  for(let i=0;i<p.count;i++){ const k = key(i); const a = acc.get(k) || [0,0,0]; a[0]+=nr.getX(i); a[1]+=nr.getY(i); a[2]+=nr.getZ(i); acc.set(k,a); }
+  for(let i=0;i<p.count;i++){ const a = acc.get(key(i)), l = Math.hypot(...a)||1; nr.setXYZ(i, a[0]/l, a[1]/l, a[2]/l); }   // (no crease at the sphere's seam)
+  return geo;
+}
+[[-2.55,0.6,1.0],[-2.25,-1.0,1.35],[2.65,-0.5,1.15],[2.25,1.25,0.8]].forEach(([x,z,s],i)=>{
+  add(lumpy(new THREE.SphereGeometry(1,30,24), 101+i, 0.30, 2.6, 0.6),'tree',x,s*1.2,z,0.36*s,1.2*s,0.36*s);
 });
-[[-1.9,2.05,0.5],[1.95,1.85,0.46],[1.2,-2.35,0.55],[-1.55,-2.2,0.48],[-2.9,-0.1,0.4]].forEach(([x,z,s])=>{
-  add(new THREE.SphereGeometry(1,20,14),'tree',x,s*0.7,z,s,s*0.72,s);
+[[-1.9,2.05,0.5],[1.95,1.85,0.46],[1.2,-2.35,0.55],[-1.55,-2.2,0.48],[-2.9,-0.1,0.4]].forEach(([x,z,s],i)=>{
+  add(lumpy(new THREE.SphereGeometry(1,26,20), 201+i, 0.30, 2.2, 0),'tree',x,s*0.7,z,s,s*0.72,s);
 });
 
 // Shapes, from the geometry of ANY model: the connected pieces of each mesh (triangles sharing vertices). Each piece gets
@@ -680,7 +698,7 @@ function buildStrokes(root, countScale, skyN){
     for(let j=0;j+1<ch.knots.length;j++){
       const a=ch.knots[j], b=ch.knots[j+1];
       S.pos.set(a,k*3); S.nor.set([0,1,0],k*3); S.tan.set([b[0]-a[0],b[1]-a[1],b[2]-a[2]],k*3);
-      S.rnd.set([rg(),rg(),rg(),rg()],k*4); S.info.set([LINE_LAYER, 9, ch.r, 1.0],k*4); S.den[k]=0; S.glaze[k]=LINE_GLAZE; k++;
+      S.rnd.set([rg(),rg(),rg(),rg()],k*4); S.info.set([LINE_LAYER, 9, ch.r, ch.board ? 2.0 : 1.0],k*4); S.den[k]=0; S.glaze[k]=LINE_GLAZE; k++;   // (info.w 2: a board, also painted as surface)
     }
   });
   // sky strokes: pinned to the sky (a band all the way round), painted with the same brush
@@ -849,7 +867,7 @@ function findThinThings(TA, TAR, nT){
     if(perp < 3.5*(A.r + B.r)){ keep[i] = false; keep[j] = false; gp[gf(i)] = gf(j); }
   }
   const out = [];
-  chains.forEach((c,i)=>{ out.push({ knots:c.knots, r:c.r }); if(!keep[i]) for(const t of c.tris) isLine[t] = 2; });
+  chains.forEach((c,i)=>{ out.push({ knots:c.knots, r:c.r, board:!keep[i] }); if(!keep[i]) for(const t of c.tris) isLine[t] = 2; });
   // ... and its boards are ONE shape (one sail, one roof): strokes run along the whole of it instead of a dab per board
   const groups = new Map(); chains.forEach((c,i)=>{ if(keep[i]) return; const g = gf(i); if(!groups.has(g)) groups.set(g, []); groups.get(g).push(...c.tris); });
   return { isLine, chains: out, boardGroups: [...groups.values()] };
@@ -1088,8 +1106,8 @@ void main(){
       if(seen && dT.a > 0.5 && abs(c.w - dT.b*uDepthRange) < max(tolZ, 2.2*vInfo.z + 0.008)){   // (a wide piece's surface is far from its centre line: the chimney)
         vec4 cc = texture2D(tThinC, q); lc += cc.rgb*exp(-shadeA(cc.a, dT.g, 0.35, dT.r)); lw += 1.0; Au += underA(q);   // its material colour, darkened only by real shade (a white bar in half light stays white)
         float lOwn = dot(cc.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cc.a);
-        { vec4 mC = texture2D(tColor, q); float lm = d.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722)) : 0.85;   // (the SAME test as the strokes'
-          rS += (d.a > 0.5 && dT.b > d.b + 0.002) ? 0.0 : smoothstep(1.15, 1.45, dot(cc.rgb, vec3(0.2126,0.7152,0.0722))/max(lm, 0.02)); }   // reserve, STROKE_FS reserveAt)
+        { vec4 mC = texture2D(tColor, q); vec3 cm = d.a > 0.5 ? mC.rgb : vec3(0.85), r3 = max((cc.rgb + 0.04)/(cm + 0.04), (cc.rgb*(0.35+0.65*cc.a) + 0.03)/((d.a > 0.5 ? mC.rgb*(0.35+0.65*mC.a) : vec3(0.85)) + 0.03));   // (the SAME test as the strokes'
+          rS += (d.a > 0.5 && dT.b > d.b + 0.002) ? 0.0 : smoothstep(1.15, 1.45, max(r3.r, max(r3.g, r3.b))); }        // reserve, STROKE_FS reserveAt)
         // against what is BESIDE it (a board kept in the reference would otherwise be compared with itself)
         vec2 qo = nW*(1.2*vInfo.z*uFocal/max(c.w, 0.05) + 2.0*uK)/uRes; float lBg = 0.0;
         for(int sd=-1; sd<=1; sd+=2){ vec2 qb = q + float(sd)*qo; vec4 bD = texture2D(tData, qb), bC = texture2D(tColor, qb);
@@ -1139,9 +1157,17 @@ void main(){
       if(uPaintRef > 0.5 && lw > 0.5){
         // a DARKER line paints only the contrast still missing against what is beside it (in its own hue); a LIGHTER one
         // was left as paper by the strokes behind it (reserved) and is painted in its own colour into that hole
-        vec3 At = col*amount; float need = max(dRef/lw, 0.0), have = dPnt/lw, V = max(need - max(have, 0.0), 0.0);
-        col = At/max(dot(At, vec3(0.3333)), 1e-3)*V/0.9;
-        amount = 0.9*smoothstep(0.04, 0.12, V)*smoothstep(0.05, 0.13, abs(cDiff/lw))*uCables;
+        vec3 At = col*0.9; float need = max(dRef/lw, 0.0), have = dPnt/lw, V = max(need - max(have, 0.0), 0.0);   // (the target is the line's FULL own colour; the contrast test below only decides whether it is drawn)
+        // what is still MISSING, channel by channel (a red rail over tan ground: the green and blue the tan lacks), or, in
+        // value, against what is beside it — whichever asks for more (hue contrast counts, not only light and dark)
+        vec3 Ar = max(At - Au/lw, vec3(0.0)), Av = At/max(dot(At, vec3(0.3333)), 1e-3)*V;
+        vec3 Am = dot(Ar, vec3(0.3333)) > dot(Av, vec3(0.3333)) ? Ar : Av;
+        // (only a BOARD — also painted as a surface — subtracts what is already there; that double count made the porch
+        // bars. A true thin thing (a rail, a cable) is out of the reference: under it is the background, and it is
+        // glazed over it in its full own colour — a painter's way; what cannot be glazed was reserved above)
+        if(vInfo.w < 1.5) Am = At;
+        col = Am/0.9;
+        amount = 0.9*smoothstep(0.04, 0.12, dot(Am, vec3(0.3333)))*smoothstep(0.05, 0.13, abs(cDiff/lw))*uCables;
         if(rS/lw > 0.3){ col = harmonise(-log(clamp(own, 0.03, 1.0)))/0.9; amount = 0.9*uCables;   // (left as paper behind it: fill that hole)
           // (the strokes behind left the thing's exact silhouette as paper: this line is drawn wider and cut to that hole,
           // so it fills it — drawn at its own width it left white slivers beside it and went dark where it missed: the ladder)
@@ -1426,7 +1452,10 @@ void main(){
       amount *= smoothstep(0.10, 0.24, amount);           // (a faint accent fades away rather than being cut off)
       col = mix(Ab*1.25, vec3(dot(Ab, vec3(0.3333))*1.1), mix(0.3, 0.7, uDetail)) + uShadow*1.6 + vec3(0.15);   // nearly neutral darks
       if(isSea){ amount = 0.26*step(0.86, rr.y)*(0.6 + 0.4*rr.w); col = Ab*1.35 + uShadow*0.35;   // a few darker ripples, level and thin
-        hw = max(1.2*uK, 0.25*hw); hl = max(hl, 2.2*hlDef); }
+        // a ripple is long, but only as long as the WATER goes: traced along it with a long step (it stopped nowhere before
+        // and ran onto the island), and cut to the sea's outline in STROKE_FS (ramp.w 3)
+        float sLr = 2.2*hlDef/6.0, Lp2 = traceOut(uv, dirT, sLr, 6, g0, s0, z0, e0, tol, 0.0), Lm2 = traceOut(uv, -dirT, sLr, 6, g0, s0, z0, e0, tol, 0.0);
+        hw = max(1.2*uK, 0.25*hw); hl = max(0.5*(Lp2 + Lm2), 1.5*uK); offPx = dirT*0.5*(Lp2 - Lm2); ramp = vec4(1.0, 0.0, 0.0, 3.0); }
       if(texMark > 0.3 && texMark*0.9 >= D - 1e-3) col = harmonise(-log(clamp(rw.rgb*(0.55+0.45*rw.a), 0.03, 1.0)))*1.25;   // a texture mark: its own colour
       if(uPaintRef > 0.5 && !isSea){                       // the rules above say WHERE a dark goes; how dark = the contrast the paint still
         vec2 cq = uv + offPx/uRes; float dH = 0.0, dO = 0.0, nO = 0.0;   // lacks: (subject - paint) here minus (subject - paint) around it
@@ -1534,7 +1563,7 @@ void main(){
   gl_Position = vec4(P/uRes*2.0-1.0, 0.0, 1.0);
   float half_ = 0.5*(s1-s0) + hw;
   vQ = vec2((s - 0.5*(s0+s1))/half_, position.y*1.18);
-  vec4 rBox = texelFetch(tS3,tx,0); bool boxyS = rBox.z < 0.5 && rBox.w > 0.5;   // (a small object's stroke: square-ended and solid)
+  vec4 rBox = texelFetch(tS3,tx,0); bool boxyS = rBox.z < 0.5 && rBox.w > 0.5 && rBox.w < 2.5;   // (a small object's stroke: square-ended and solid)
   vCol = c; vP = vec3(wet, boxyS ? 0.0 : dry, boxyS ? 5.0 : 2.0+1.3*rr.y); vSeed = rr.x*40.0+rr.w*13.0;
   vWob = clamp(hw/(2.5*uRes.y/700.0), 0.0, 1.0);
   vRamp = texelFetch(tS3,tx,0);   // a fine line is drawn steadily: no ragged edge at that scale
@@ -1544,7 +1573,8 @@ void main(){
   float cutOn = uCut*step(0.25, eM.z)*((layer > 0.5 && layer < 1.5) || (layer > 1.5 && layer < 2.5 && vRamp.z > 0.5) ? 1.0 : 0.0);
   if(layer > 1.5 && layer < 2.5 && vRamp.z < 0.5) cutOn = 2.0*uCut;   // the shadow passage: cut to the SHADE (it stops where the light starts)
   vShp = vec3(eM.zw, cutOn);
-  if(layer > 4.5 && layer < 5.5 && rBox.w > 1.5) vShp.z = 3.0;   // a LIGHT thin thing's line: cut to its reserved hole (STROKE_FS)
+  if(layer > 4.5 && layer < 5.5 && rBox.w > 1.5) vShp.z = 3.0;
+  if(layer > 2.5 && layer < 3.5 && rBox.w > 2.5 && eM.z >= 0.25) vShp.z = 1.0*uCut;   // a sea ripple: cut to the water like a colour stroke   // a LIGHT thin thing's line: cut to its reserved hole (STROKE_FS)
   vRes = (layer > 4.5 && layer < 5.5) ? 0.0 : 1.0;       // every stroke but a thin thing's own line keeps off the lighter thin things
   { vec4 cM = texture2D(tLitS, (a.xy + arcOff(a.z, a.w, 0.5*(s0+s1)))/uRes);
     vLum = vec2(dot(cM.rgb, vec3(0.2126,0.7152,0.0722))*(0.4+0.6*cM.a), step(0.25, eM.z)*vRes); }   // (its own value, for painting around lighter things)
@@ -1562,8 +1592,13 @@ float reserveAt(vec2 q){
   vec4 tC = texture2D(tThinCS, q), mC = texture2D(tLitS, q);
   // (by the materials' own colours, not their lit brightness: a light thing on a dark wall is painted around along its
   // whole length, in light and in shade — compared lit, a ladder in shade was not, and brown over blue went black)
-  float lt = dot(tC.rgb, vec3(0.2126,0.7152,0.0722)), lm = mD.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722)) : 0.85;
-  return smoothstep(1.15, 1.45, lt/max(lm, 0.02));
+  // (CHANNEL BY CHANNEL: a thing is reserved when any of its colours is clearly lighter than what is behind — a red rail
+  // over blue water cannot be glazed on top (red over blue is purple-black), so it is left as paper and painted red)
+  // ... as MATERIALS, or as LIT (a red rail in the sun over sand in a tree's shadow: the grey shade absorbs red too)
+  vec3 cm = mD.a > 0.5 ? mC.rgb : vec3(0.85), r3 = (tC.rgb + 0.04)/(cm + 0.04);
+  vec3 r4 = (tC.rgb*(0.35+0.65*tC.a) + 0.03)/((mD.a > 0.5 ? mC.rgb*(0.35+0.65*mC.a) : vec3(0.85)) + 0.03);
+  r3 = max(r3, r4);
+  return smoothstep(1.15, 1.45, max(r3.r, max(r3.g, r3.b)));
 }
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 float vn(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);
@@ -1953,8 +1988,9 @@ float resW(vec2 q){                                       // (the reserved light
   vec4 tD = texture(tThinD, q); if(tD.a < 0.5) return 0.0;
   vec4 mD = texture(tData, q); if(mD.a > 0.5 && tD.b > mD.b + 0.002) return 0.0;
   vec4 tC = texture(tThinC, q), mC = texture(tColor, q);
-  float lt = dot(tC.rgb, vec3(0.2126,0.7152,0.0722)), lm = mD.a > 0.5 ? dot(mC.rgb, vec3(0.2126,0.7152,0.0722)) : 0.85;   // (as reserveAt)
-  return step(1.3, lt/max(lm, 0.02));
+  vec3 cm = mD.a > 0.5 ? mC.rgb : vec3(0.85), r3 = (tC.rgb + 0.04)/(cm + 0.04);   // (as reserveAt)
+  r3 = max(r3, (tC.rgb*(0.35+0.65*tC.a) + 0.03)/((mD.a > 0.5 ? mC.rgb*(0.35+0.65*mC.a) : vec3(0.85)) + 0.03));
+  return step(1.3, max(r3.r, max(r3.g, r3.b)));
 }
 void main(){
   vec4 d0 = texture(tData, vUv), e0 = texture(tShape, vUv), c0 = texture(tColor, vUv); vec3 g0 = sqrt(c0.rgb);
@@ -2441,7 +2477,7 @@ function buildRods(){
   strokeMeshes.rods = makeStrokeMesh(rodsGroup);
   loaded.rods = true;
 }
-const mill2Group = packGroup(), mill3Group = packGroup(), lightGroup = packGroup(), moominGroup = packGroup(), bridgeGroup = packGroup();
+const mill2Group = packGroup(), mill3Group = packGroup(), lightGroup = packGroup(), moominGroup = packGroup(), bridgeGroup = packGroup(), castleGroup = packGroup();
 
 // Framing, sun and brush for a model are worked out from its bounds and size; a model may override any of them here.
 // (To add a model: put its meshes in a group, call makeStrokeMesh(group), add an entry to MODELS — usually just its view.)
@@ -2493,7 +2529,8 @@ const MODELS = {
   lighthouse:{ root:()=>lightGroup, yaw:0.70, pitch:0.38, fit:1.05, shadeK:2.0, load:()=>loadPack('lighthouse', 'lighthouse', lightGroup, { lift:2.0, sea:{ col:[90,114,118], c:[0.45,-0.1], r:6.4, frameR:5.0 } }),
                fade:{ c:new THREE.Vector2(0.45,-0.1), r:5.9, y:-2.84 } },   // (a larger sea, fading out from just beyond the island)   // (more of its sea)   // (its own sea: faded in a ring round the island, not at the sea's far edges)
   moomin:  { root:()=>moominGroup, yaw:0.70, pitch:0.38, fit:0.88, shadeK:1.3, load:()=>loadPack('moomin', 'moomin_house', moominGroup, { ground:true, lift:1.4 }) },
-  bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup, { plate:{ col:[230,169,118], base:[97,63,41], r:5.6 } }) }
+  bridge:  { root:()=>bridgeGroup, yaw:0.55, pitch:0.38, fit:1.45, shadeK:1.3, load:()=>loadPack('bridge', 'bridge_garden', bridgeGroup, { plate:{ col:[230,169,118], base:[97,63,41], r:5.6 } }) },
+  castle:  { root:()=>castleGroup, yaw:2.6, pitch:0.30, fit:1.0, shadeK:1.3, fade:null, load:()=>loadPack('castle', 'floating_castle', castleGroup, {}) }   // (it floats: no ground, no fade)
 };
 const CFG = {};
 // the sun is set as a painter sets up the subject: from the front-left of its OPENING view, high (three-quarter light),
@@ -2571,6 +2608,8 @@ const PAINTINGS = [
     credit:'“Moomin House” by <a href="https://sketchfab.com/3d-models/moomin-house-f262979495b943e2b28bc7a8a72c7cd4" target="_blank" rel="noopener">Kuutti Siitonen</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (simplified, grass added around it) and used as the painter’s reference. Moomin designs © Moomin Characters Ltd.' },
   { id:'bridge', title:'The Japanese Bridge', desc:'A red bridge over a garden pond', aria:'A Japanese garden with a red bridge, painted in watercolour', heavy:true, data:'bridge_garden',
     credit:'“Japanese Bridge Garden” by <a href="https://sketchfab.com/3d-models/japanese-bridge-garden-d122e17593eb4012913cde927486d15a" target="_blank" rel="noopener">kristenlee</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page and used as the painter’s reference.' },
+  { id:'castle', title:'The Floating Castle', desc:'A castle on the back of a flying turtle', aria:'A castle on the back of a flying turtle, painted in watercolour', heavy:true, data:'floating_castle',
+    credit:'“Floating Castle” by <a href="https://sketchfab.com/3d-models/floating-castle-1e157bab3a4042eb834ca07d73aa28ce" target="_blank" rel="noopener">Shahriar Shahrabi</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (simplified; sky, clouds, birds, the flying machine, effects and outlines removed) and used as the painter’s reference.' },
 ].filter(p => !p.hidden && (p.id === 'pavilion' || typeof DecompressionStream !== 'undefined') && (!p.data || (window.MODEL_DATA && window.MODEL_DATA[p.data])));
 const thumb = id => (window.THUMBS && window.THUMBS[id]) || '';
 const paintingsEl = $('paintings'), picker = $('picker'), pickBtn = $('pickBtn');
@@ -2585,7 +2624,7 @@ function showPainting(name){
   $('pickBtn').setAttribute('aria-label', 'Choose a painting (now: '+p.title+')');
   pickBtn.setAttribute('aria-label', 'Choose a painting (now: '+p.title+')');
   [...paintingsEl.querySelectorAll('button')].forEach(b=>b.setAttribute('aria-current', b.dataset.id===name ? 'true' : 'false'));
-  canvas.setAttribute('aria-label', p.aria+'. Drag to turn it, pinch to zoom.');
+  canvas.setAttribute('aria-label', p.aria+'. Drag to rotate the painting, pinch to zoom.');
   $('credit').innerHTML = '<p>'+p.credit+'</p>';
 }
 let switching = null;
@@ -2663,6 +2702,7 @@ let touched=false, dirty=true;
 const pointers = new Map(); let pinch0=0, zoom0=1;
 const hint = $('hint');
 function touch(){ if(!touched){ touched=true; hint.classList.add('gone'); } }
+setTimeout(()=>hint.classList.add('gone'), 5000);   // (the hint fades away after 5 s even without a touch; the opening turn goes on)
 canvas.addEventListener('pointerdown', e=>{
   canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY,h:[{t:e.timeStamp,x:e.clientX,y:e.clientY}]}); touch();
   view.vyaw=0; view.vpitch=0; if(pointers.size===1) pinched=false;
