@@ -436,7 +436,8 @@ float fbm3(vec3 p){ float a=0.5,s=0.0; for(int i=0;i<4;i++){ s+=a*vn3(p); p=p*2.
 const LIGHT_DIR = new THREE.Vector3(-0.62, 0.80, 0.30).normalize();   // a fixed sun: shadows stay put as you turn
 const SHARED = {
   uL:{value:LIGHT_DIR.clone()}, uDepthRange:{value:64},
-  uLightVP:{value:new THREE.Matrix4()}, uLightV:{value:new THREE.Matrix4()}, tShadow:{value:null}
+  uLightVP:{value:new THREE.Matrix4()}, uLightV:{value:new THREE.Matrix4()}, tShadow:{value:null},
+  tOccl:{value:null}, uOccl:{value:0}, uOcclRes:{value:new THREE.Vector2(1,1)}   // (the thin pass: depth-tested against the model)
 };
 
 const SCENE_VS = `
@@ -480,6 +481,7 @@ layout(location=0) out highp vec4 gC;
 layout(location=1) out highp vec4 gD;
 layout(location=2) out highp vec4 gL;
 layout(location=3) out highp vec4 gS;      // which SHAPE this is (from the geometry) and which way it faces
+uniform sampler2D tOccl; uniform float uOccl; uniform vec2 uOcclRes;
 ${NOISE_GLSL}
 float shadowAt(vec3 wp, float ndl){
   vec4 lp = uLightVP*vec4(wp,1.0);
@@ -495,6 +497,9 @@ float shadowAt(vec3 wp, float ndl){
   return sh/9.0;
 }
 void main(){
+  // THE THIN PASS SEES ONLY WHAT IS VISIBLE (user: "a simple way to know what is hidden"): a thin thing's fragment behind
+  // the model's own surface here is dropped — its picture then holds exactly its visible part
+  if(uOccl > 0.5){ vec4 dm = texture(tOccl, gl_FragCoord.xy/uOcclRes); if(dm.a > 0.5 && vZ/uDepthRange > dm.b + 0.0002) discard; }
   vec3 N = normalize(vN);
 #ifdef VCOL
   if(!gl_FrontFacing) N = -N;
@@ -589,7 +594,7 @@ function matFor(role){
   if(!roleMats[role]){
     roleMats[role] = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
-      uniforms:{ uL:SHARED.uL, uDepthRange:SHARED.uDepthRange, uLightVP:SHARED.uLightVP, uLightV:SHARED.uLightV, tShadow:SHARED.tShadow,
+      uniforms:{ uL:SHARED.uL, uDepthRange:SHARED.uDepthRange, uLightVP:SHARED.uLightVP, uLightV:SHARED.uLightV, tOccl:SHARED.tOccl, uOccl:SHARED.uOccl, uOcclRes:SHARED.uOcclRes, tShadow:SHARED.tShadow,
                  uAlbedo:{value:new THREE.Vector3(1,1,1)}, uFade:{value:role==='ground'?1:0} },
       defines: role==='grass' ? { GRASS:'' } : role==='dome' ? { PATINA:'' } : {},
       vertexShader:SCENE_VS, fragmentShader:SCENE_FS
@@ -1162,7 +1167,7 @@ void main(){
   if(uCull > 0.5){                                       // (speed: no fragment for a stroke that cannot be drawn this frame)
     float layer = aInfo.x; bool keep = true;
     if(layer > 5.5){                                     // a sky stroke off the picture
-      float P = 5.6548668, cx = uYaw*0.9; float dx = aPos.x - cx; dx -= P*floor(dx/P + 0.5);
+      float P = 5.6548668, cx = -uYaw*0.9; float dx = aPos.x - cx; dx -= P*floor(dx/P + 0.5);
       vec2 tcS = vec2(dx/(uAspect*0.9) + 0.5, (aPos.y - uPitch*0.35)/0.9 + 0.5)*2.0-1.0;
       keep = abs(tcS.x)<1.25 && abs(tcS.y)<1.25;
     } else if(layer < 4.5){                              // a surface stroke hidden, turned away or off screen (same test as PLAN_FS)
@@ -1323,7 +1328,7 @@ void main(){
 
   if(isSky){
     // the sky is a pale wash too, pinned to the sky itself and painted AROUND the subject (negative painting)
-    float P = 5.6548668, cx = uYaw*0.9;
+    float P = 5.6548668, cx = -uYaw*0.9;   // (the sky turns WITH the view: as the camera orbits, the far sky moves the way the model's far side does — user)
     float dx = vPos.x - cx; dx -= P*floor(dx/P + 0.5);
     vec2 sp = vec2(cx+dx, vPos.y);
     vec2 uvS = vec2(dx/(uAspect*0.9) + 0.5, (vPos.y - uPitch*0.35)/0.9 + 0.5);
@@ -2009,20 +2014,12 @@ void main(){
     }
   }
   if(uEarlyS > 0.5 && a <= 0.0){ gl_FragColor = vec4(0.0); return; }
-  // A LINE PAINTS ONLY WHERE IT IS IN FRONT (user: the struts under the Dutch mill's deck): at this pixel the frontmost thin
-  // thing must be of the line's own colour, and no surface may lie in front of the thin picture
+  // A LINE PAINTS ONLY WHERE ITS PIECE IS SEEN (user: the struts under the Dutch mill's deck): the thin pass is depth-tested
+  // against the model, so its picture holds exactly the visible parts; a line paints where that picture shows something
   if(vRes < 0.5 && uLineOcc > 0.5){
-    vec2 qq = gl_FragCoord.xy/uRes; vec4 tD = texture2D(tThinDS, qq), mD = texture2D(tDataS, qq);
-    // (nothing thin is seen here or within ~2 px: the line's piece is hidden here — under a deck, behind a wall)
-    float near = tD.a; for(int k=0;k<8;k++){ float an = float(k)*0.7853982; near = max(near, texture2D(tThinDS, qq + vec2(cos(an), sin(an))*2.2/uRes).a); }
+    vec2 qq = gl_FragCoord.xy/uRes; float near = texture2D(tThinDS, qq).a;
+    for(int k=0;k<8;k++){ float an = float(k)*0.7853982; near = max(near, texture2D(tThinDS, qq + vec2(cos(an), sin(an))*2.2/uRes).a); }
     a *= step(0.5, near);
-    if(tD.a > 0.5){
-      vec3 own = exp(-vCol.rgb), seenC = texture2D(tThinCS, qq).rgb;   // (compared by HUE: the line's paint is shaded, the picture lit)
-      vec3 hO = own/max(dot(own, vec3(0.3333)), 1e-3), hS = seenC/max(dot(seenC, vec3(0.3333)), 1e-3);
-      float same = (1.0 - smoothstep(0.20, 0.40, length(hO - hS)))*(1.0 - smoothstep(0.40, 0.60, length(sqrt(seenC) - sqrt(own))));   // (hue, and how light: a dark strut under a tan deck)
-      float cov = (mD.a > 0.5 && tD.b > mD.b + 0.0004) ? 1.0 : 0.0;   // (a surface in front of the thin picture — even just in front: struts right under a deck)
-      a *= same*(1.0 - cov);
-    }
   }
   if(vShp.z > 2.5){                                      // a light thin thing's line fills exactly the hole left for it
     float hole = 0.0;
@@ -2131,7 +2128,7 @@ void main(){
   if(a1.w >= uQN) discard;
   if(uCull > 0.5){
     float layer = vInfo.x; bool keep = true;
-    if(layer > 5.5){ float P = 5.6548668, cx = uYaw*0.9; float dx = vPos.x - cx; dx -= P*floor(dx/P + 0.5);
+    if(layer > 5.5){ float P = 5.6548668, cx = -uYaw*0.9; float dx = vPos.x - cx; dx -= P*floor(dx/P + 0.5);
       vec2 tcS = vec2(dx/(uAspect*0.9) + 0.5, (vPos.y - uPitch*0.35)/0.9 + 0.5)*2.0-1.0; keep = abs(tcS.x)<1.25 && abs(tcS.y)<1.25; }
     else if(layer < 4.5){ vec2 ndc = vClip.xy/vClip.w; vec2 uv = ndc*0.5+0.5; float vz = vClip.w;
       if(!(abs(ndc.x) < 1.15 && abs(ndc.y) < 1.15 && vClip.w > 0.0)) keep = false;
@@ -2162,7 +2159,7 @@ void main(){
   vec4 prev = texelFetch(tP4, tx, 0); oG = texelFetch(tP0, tx, 0);
   if(idx >= uNT || (prev.x == 0.0 && prev.y == 0.0 && prev.z == 0.0)){ oA = prev; return; }
   float layer = texelFetch(tA4, tx, 0).x;
-  if(layer > 5.5){ vec2 o = vec2(-uDYaw/uAspect*uRes.x, -uDPitch*0.35/0.9*uRes.y); oA = prev + vec4(o, 0.0, 0.0); oG.xy += o; return; }
+  if(layer > 5.5){ vec2 o = vec2(uDYaw/uAspect*uRes.x, -uDPitch*0.35/0.9*uRes.y); oA = prev + vec4(o, 0.0, 0.0); oG.xy += o; return; }
   vec3 pos = texelFetch(tA0, tx, 0).xyz, nor = texelFetch(tA1, tx, 0).xyz;
   vec4 c = uProj*viewMatrix*vec4(pos, 1.0); vec2 ndc = c.xy/max(c.w, 1e-3), uv = ndc*0.5 + 0.5;
   float vis = prev.z;
@@ -2871,7 +2868,7 @@ const finalScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGe
 function makeModelMat(atlas, grid, mulCol, lift){
   return new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3, defines:{ VCOL:'' },
-    uniforms:{ uL:SHARED.uL, uDepthRange:SHARED.uDepthRange, uLightVP:SHARED.uLightVP, uLightV:SHARED.uLightV, tShadow:SHARED.tShadow,
+    uniforms:{ uL:SHARED.uL, uDepthRange:SHARED.uDepthRange, uLightVP:SHARED.uLightVP, uLightV:SHARED.uLightV, tOccl:SHARED.tOccl, uOccl:SHARED.uOccl, uOcclRes:SHARED.uOcclRes, tShadow:SHARED.tShadow,
                uAlbedo:{value:new THREE.Vector3(1,1,1)}, uFade:{value:0}, uTint:SHARED_TINT, tAtlas:{value:atlas}, uAtlasG:{value:grid}, uMulCol:{value:mulCol}, uLift:{value:lift||1}, uPlank:{value:new THREE.Vector4(0,0,0,0)}, uBlock:{value:new THREE.Vector2(0.24,0.12)} },
     vertexShader:SCENE_VS, fragmentShader:SCENE_FS, side:THREE.DoubleSide
   });
@@ -3855,7 +3852,9 @@ function render(dt){
   // 1. the 3D picture the painter looks at
   renderer.setRenderTarget(rtMain); renderer.setClearColor(CLEAR_ZERO, 0); renderer.render(scene, camera);
   if(__sync) __sync('ref');
-  camera.layers.set(1); renderer.setRenderTarget(rtThin); renderer.render(scene, camera); camera.layers.set(0);   // (the thin things, on their own)
+  SHARED.tOccl.value = rtMain.texture[1]; SHARED.uOcclRes.value.set(W,H); SHARED.uOccl.value = OPT.thinOccl === 0 ? 0 : 1;
+  camera.layers.set(1); renderer.setRenderTarget(rtThin); renderer.render(scene, camera); camera.layers.set(0);
+  SHARED.uOccl.value = 0; SHARED.tOccl.value = null;   // (never bound while the model itself is drawn into that target)   // (the thin things, on their own)
 
   if(__sync) __sync('thin');
   aoMat.uniforms.uFocal.value = H*0.5/t;
