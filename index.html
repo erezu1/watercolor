@@ -312,6 +312,7 @@ const OPT = window.__OPT = Object.assign({ quad:1, cull:1, early:1, sort:1, skip
 const PHONE = (()=>{ try{ return matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) < 900; }catch(e){ return false; } })();
 const QS = new URLSearchParams(location.search);
 if(OPT.halfPlan === undefined) OPT.halfPlan = PHONE ? 1 : 0;   // (every phone: confirmed smooth on the user's phone; n: n light frames per full plan)
+if(OPT.fence === undefined) OPT.fence = PHONE ? 1 : 0;   // (a new frame only when the GPU has finished the last one: no backlog, no 100 ms stalls)
 if(OPT.settleEvery === undefined) OPT.settleEvery = PHONE ? 2 : 1;   // (while strokes settle, the plan follows the paint every n-th frame)   // (while the view moves, the full plan every other frame; the anchors every frame)
 
 let renderer;
@@ -3488,10 +3489,14 @@ function render(dt){
 
 // the coast slows by drag (∝ speed) plus a little friction, so it stops in finite time: from 1.5 rad/s in ~0.5 s
 function coastStep(v, dt){ const m = Math.max(0, Math.abs(v)*Math.exp(-5*dt) - 0.8*dt); return m < 0.01 ? 0 : Math.sign(v)*m; }
+let gpuFence = null, fenceT = 0, drawnN = 0;
 let last = performance.now(), emaDt = 16, slowFrames = 0, born = last, animUntil = 0;
 function frame(now){
   requestAnimationFrame(frame);
   if(window.__freeze) return;
+  // (OPT.fence) the phone's GPU takes longer than a vsync per frame: queued frames piled up and the browser then stalled
+  // for 5-7 vsyncs at once (measured: 15-20% of frames 85-120 ms). So a frame starts only when the last one is done.
+  if(gpuFence){ const gl = renderer.getContext(); if(gl.getSyncParameter(gpuFence, gl.SYNC_STATUS) !== gl.SIGNALED && now - fenceT < 250) return; gl.deleteSync(gpuFence); gpuFence = null; }
   const dt = Math.min(0.05, (now-last)/1000); last = now;
   if(!touched && !reduceMotion && now-born < 16000){        // the opening turn: a turn, a pause (details are painted), a turn ...
     const ph = ((now-born)/1000) % 3.2; if(ph < 1.6){ view.yaw += dt*0.32*Math.sin(Math.PI*ph/1.6)*1.57; dirty = true; } }
@@ -3505,7 +3510,8 @@ function frame(now){
   if(dirty) animUntil = now + 1300;                     // the strokes need a moment to finish growing / drying
   if(now > animUntil) return;                            // nothing changing: the painting stays as it is
   dirty=false;
-  render(dt);
+  render(dt); drawnN++;
+  if(OPT.fence){ const gl = renderer.getContext(); gpuFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); fenceT = now; }
   if(perfBox) perfTick(now);
   emaDt += (dt*1000-emaDt)*0.08;
   if(emaDt>36 && ++slowFrames>45){
@@ -3574,6 +3580,7 @@ window.__pavilion = { rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }
     return { strokes:L, refPx:[w,h], modelCover:+(cov/(w*h)).toFixed(3), shapesVisible:sh.size, shapesBig:nBig, colourSpreadInShape:+(varW/Math.max(wsum,1)).toFixed(3),
              colourJumpsPer1000px:+(1000*jumps/Math.max(inside,1)).toFixed(1), tris, nShapes:root.userData.nShapes, cfg:cfgFor(current).detail, holes:+(holes/Math.max(cand,1)).toFixed(3), mottle:+(mot/Math.max(mw,1)).toFixed(3) };
   }, pixShade:(v)=>{ strokeMat.uniforms.uPixShade.value=v; dirty=true; }, wetRel:(v)=>{ wetMat.uniforms.uWetRel.value=v; dirty=true; }, smallShape:(v)=>{ planMat.uniforms.uSmallShape.value=v; resetStrokes=true; dirty=true; }, paintRef:(v)=>{ planMat.uniforms.uPaintRef.value=v; resetStrokes=true; dirty=true; }, setQuality:(q)=>{ quality=q; applyQuality(); resetStrokes=true; dirty=true; }, nShapes:(n)=>MODELS[n].root().userData.nShapes, cfg:(n)=>{ const c=cfgFor(n); return [c.detail, c.strokeK, c.fit]; }, camDist:()=>planMat.uniforms.uCamDist.value, grainTest:(g,n,p)=>{ /* (test: granulation, ragged-edge noise, paper tooth) */ resolveMat.uniforms.uGranK.value=g; resolveMat.uniforms.uNzK.value=n; finalMat.uniforms.uPaperK.value=p; dirty=true; }, cut:(v)=>{ strokeMat.uniforms.uCut.value=v; dirty=true; }, view, setScene, setMood:(i)=>setMood(i,false), render:()=>{dirty=true;},
+  perfInfo:()=>({ drawn:drawnN, fence:OPT.fence, kind:frameKind, restT, intScale, quality, W, H, phone:PHONE, halfPlan:OPT.halfPlan, settleEvery:OPT.settleEvery, scene:current }),   // (test: the phone benchmark page)
   snap:()=>{ resetStrokes=true; }, step:(dt)=>render(dt), settle:(n,dt)=>{ for(let i=0;i<(n||0);i++) render(dt||0.1); render(dt||0.1); }, reset:()=>{ resetStrokes=true; }, memory:(v)=>{ noMemory = !v; }, dbgS:(v)=>{ stateMat.uniforms.uDbgS.value = v; }, stop:()=>{touched=true;}, setLoose:(v)=>{loose=v;dirty=true;},
   raw:(v)=>{ showRaw=showRawTarget=v; }, wet:(v)=>{ resolveMat.uniforms.uWetOn.value=v; dirty=true; }, solo:(g)=>{ resolveMat.uniforms.uSolo.value=g; dirty=true; }, dbg:(v)=>{ finalMat.uniforms.uDbg.value=v; }, cables:(v)=>{ planMat.uniforms.uCables.value=v; dirty=true; }, dbgP:(v)=>{ planMat.uniforms.uDbgP.value=v; dirty=true; },
   passes:(n)=>{ const gl=renderer.getContext(), px=new Uint8Array(4), f4=new Float32Array(4), acc={}; let t=0;
