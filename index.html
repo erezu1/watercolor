@@ -311,7 +311,7 @@ const OPT = window.__OPT = Object.assign({ quad:1, cull:1, early:1, sort:1, skip
 // (a phone: see intScale and quality below)
 const PHONE = (()=>{ try{ return matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) < 900; }catch(e){ return false; } })();
 const QS = new URLSearchParams(location.search);
-if(OPT.halfPlan === undefined) OPT.halfPlan = PHONE ? 1 : 0;   // (while the view moves, the full plan every other frame; the anchors every frame)
+if(OPT.halfPlan === undefined) OPT.halfPlan = PHONE && QS.get('perf') === '1' ? 1 : 0;   // (on test with ?perf=1 only, until confirmed)   // (while the view moves, the full plan every other frame; the anchors every frame)
 
 let renderer;
 try{
@@ -1928,15 +1928,16 @@ const planQMat = new THREE.ShaderMaterial({
 // follows), and keeps last plan's goals. Sky strokes move with the view's turn.
 const ANCH_FS = `
 precision highp float; precision highp sampler2D;
-uniform sampler2D tA0; uniform sampler2D tA1; uniform sampler2D tA4; uniform sampler2D tP4; uniform sampler2D tData; uniform sampler2D tShape;
+uniform sampler2D tA0; uniform sampler2D tA1; uniform sampler2D tA4; uniform sampler2D tP4; uniform sampler2D tP0; uniform sampler2D tData; uniform sampler2D tShape;
 uniform mat4 uProj; uniform float uNT, uS, uDepthRange, uDYaw, uDPitch, uAspect; uniform vec2 uRes;
 layout(location=0) out highp vec4 oA;
+layout(location=1) out highp vec4 oG;   // (last plan's path, carried by its anchor's move: no stroke is pulled back to a frame-old goal)
 void main(){
   ivec2 tx = ivec2(gl_FragCoord.xy); float idx = float(tx.y)*uS + float(tx.x);
-  vec4 prev = texelFetch(tP4, tx, 0);
+  vec4 prev = texelFetch(tP4, tx, 0); oG = texelFetch(tP0, tx, 0);
   if(idx >= uNT || (prev.x == 0.0 && prev.y == 0.0 && prev.z == 0.0)){ oA = prev; return; }
   float layer = texelFetch(tA4, tx, 0).x;
-  if(layer > 5.5){ oA = prev + vec4(-uDYaw/uAspect*uRes.x, -uDPitch*0.35/0.9*uRes.y, 0.0, 0.0); return; }
+  if(layer > 5.5){ vec2 o = vec2(-uDYaw/uAspect*uRes.x, -uDPitch*0.35/0.9*uRes.y); oA = prev + vec4(o, 0.0, 0.0); oG.xy += o; return; }
   vec3 pos = texelFetch(tA0, tx, 0).xyz, nor = texelFetch(tA1, tx, 0).xyz;
   vec4 c = uProj*viewMatrix*vec4(pos, 1.0); vec2 ndc = c.xy/max(c.w, 1e-3), uv = ndc*0.5 + 0.5;
   float vis = prev.z;
@@ -1948,10 +1949,11 @@ void main(){
     if(!(abs(ndc.x) < 1.15 && abs(ndc.y) < 1.15 && c.w > 0.0)) vis = 0.0;
   }
   oA = vec4(uv*uRes, vis, prev.w);
+  vec2 off = uv*uRes - prev.xy; if(length(off) < 400.0) oG.xy += off;
 }`;
-const rtAnch = new THREE.WebGLRenderTarget(STATE_S, STATE_S, { type:THREE.FloatType, format:THREE.RGBAFormat, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false, generateMipmaps:false });
+const rtAnch = new THREE.WebGLMultipleRenderTargets(STATE_S, STATE_S, 2, { type:THREE.FloatType, format:THREE.RGBAFormat, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false, generateMipmaps:false });
 const anchMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3,
-  uniforms:{ tA0:{value:null}, tA1:{value:null}, tA4:{value:null}, tP4:{value:null}, tData:{value:null}, tShape:{value:null}, uProj:{value:new THREE.Matrix4()},
+  uniforms:{ tA0:{value:null}, tA1:{value:null}, tA4:{value:null}, tP4:{value:null}, tP0:{value:null}, tData:{value:null}, tShape:{value:null}, uProj:{value:new THREE.Matrix4()},
              uNT:{value:0}, uS:{value:STATE_S}, uDepthRange:SHARED.uDepthRange, uDYaw:{value:0}, uDPitch:{value:0}, uAspect:{value:1}, uRes:{value:new THREE.Vector2(1,1)} },
   vertexShader:`void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader:ANCH_FS, depthTest:false, depthWrite:false, blending:THREE.NoBlending });
 const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneGeometry(2,2), anchMat); q.frustumCulled = false; anchScene.add(q); }
@@ -3431,7 +3433,7 @@ function render(dt){
   if(OPT.quad){ const Q = planQMat.uniforms, M = strokeMeshes[current]; for(let i=0;i<5;i++) Q['tA'+i].value = M.attrTex[i]; Q.uNT.value = M.total; Q.uProj.value.copy(camera.projectionMatrix);
     if(!OPT.sort) P.uQN.value = Math.ceil(M.total*quality); }
   if(light){ const A = anchMat.uniforms, M = strokeMeshes[current];
-    A.tA0.value = M.attrTex[0]; A.tA1.value = M.attrTex[1]; A.tA4.value = M.attrTex[4]; A.tP4.value = rtPlan.texture[4]; A.tData.value = rtMain.texture[1]; A.tShape.value = rtMain.texture[3];
+    A.tA0.value = M.attrTex[0]; A.tA1.value = M.attrTex[1]; A.tA4.value = M.attrTex[4]; A.tP4.value = rtPlan.texture[4]; A.tP0.value = rtPlan.texture[0]; A.tData.value = rtMain.texture[1]; A.tShape.value = rtMain.texture[3];
     A.uProj.value.copy(camera.projectionMatrix); A.uNT.value = M.total; A.uDYaw.value = view.yaw - lastFullPlan.yaw; A.uDPitch.value = view.pitch - lastFullPlan.pitch; A.uAspect.value = W/H; A.uRes.value.set(W,H);
     renderer.setRenderTarget(rtAnch); renderer.render(anchScene, postCam);
   } else {
@@ -3440,7 +3442,7 @@ function render(dt){
   }
   if(__sync) __sync('plan');
   }
-  stateMat.uniforms.tP4.value = planLight ? rtAnch.texture : rtPlan.texture[4];
+  stateMat.uniforms.tP4.value = planLight ? rtAnch.texture[0] : rtPlan.texture[4]; stateMat.uniforms.tP0.value = planLight ? rtAnch.texture[1] : rtPlan.texture[0];
 
   // 2b. the painted strokes change toward the plan, by the medium's rules (grow / stay / dry away)
   const rdS = rtState[stateRead], wrS = rtState[1-stateRead], SM = stateMat.uniforms;
