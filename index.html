@@ -434,9 +434,27 @@ if(!renderer.capabilities.isWebGL2){ fail(); return; }
 // one is missing instead of a blank page; a friend's phone showed only the paper)
 { const gl = renderer.getContext(), miss = [];
   if(!gl.getExtension('EXT_color_buffer_float')) miss.push('float render targets (EXT_color_buffer_float)');
-  const mdb = gl.getParameter(gl.MAX_DRAW_BUFFERS); if(mdb < 6) miss.push('6 draw buffers (has '+mdb+')');
+  const mdb = gl.getParameter(gl.MAX_DRAW_BUFFERS); if(mdb < 4) miss.push('4 draw buffers (has '+mdb+')');
   if(typeof DecompressionStream === 'undefined') miss.push('DecompressionStream (browser too old)');
   if(miss.length){ fail(miss.join(' · ') + ' — ' + (gl.getParameter(gl.RENDERER) || '')); return; } }
+// FEWER THAN 6 OUTPUTS PER PASS (WebGL 2 promises 4; older Android GPUs stop there): a shader writing more is compiled
+// twice — part A writes outputs 0–3, part B the rest — into two targets that look like one to the rest of the code
+// (rt.texture lists both). Only on such devices: the others run exactly as before. (OPT.split forces it, for testing.)
+const SPLIT = renderer.getContext().getParameter(renderer.getContext().MAX_DRAW_BUFFERS) < 6 || !!OPT.split;
+function splitFS(src, part){ return src.replace(/layout\(location=(\d)\) out highp vec4 (\w+);/g, (m, k, n) => { k = +k;
+  if(part === 'A') return k < 4 ? m : 'highp vec4 ' + n + ';'; return k < 4 ? 'highp vec4 ' + n + ';' : 'layout(location=' + (k - 4) + ') out highp vec4 ' + n + ';'; }); }
+function splitMat(mat){ if(!SPLIT || !/layout\(location=[4-7]\)/.test(mat.fragmentShader)) return mat; const src = mat.fragmentShader;
+  mat.fragmentShader = splitFS(src, 'A');
+  mat.userData.splitB = new THREE.ShaderMaterial({ glslVersion:mat.glslVersion, uniforms:mat.uniforms, defines:mat.defines, vertexShader:mat.vertexShader, fragmentShader:splitFS(src, 'B'),
+    depthTest:mat.depthTest, depthWrite:mat.depthWrite, blending:mat.blending, side:mat.side, transparent:mat.transparent });
+  return mat; }
+function mrt(w, h, n, opts){ if(!SPLIT || n <= 4) return new THREE.WebGLMultipleRenderTargets(w, h, n, opts);
+  const a = new THREE.WebGLMultipleRenderTargets(w, h, 4, opts), b = new THREE.WebGLMultipleRenderTargets(w, h, n - 4, opts);
+  return { split:true, a, b, texture:[...a.texture, ...b.texture], width:w, height:h }; }
+function renderTo(rt, scene, cam){ if(!rt.split){ renderer.setRenderTarget(rt); renderer.render(scene, cam); return; }
+  renderer.setRenderTarget(rt.a); renderer.render(scene, cam);
+  const sw = []; scene.traverse(o => { if(o.material && o.material.userData && o.material.userData.splitB){ sw.push([o, o.material]); o.material = o.material.userData.splitB; } });
+  renderer.setRenderTarget(rt.b); renderer.render(scene, cam); sw.forEach(([o, m]) => o.material = m); }
 { const ce = console.error.bind(console); console.error = (...a) => { ce(...a); const t = a.map(String).join(' ');   // (a shader the GPU's driver rejects: say so, with the first line of the log)
     if(/Shader Error|VALIDATE_STATUS|not compiled/.test(t) && !window.__shownErr){ window.__shownErr = 1; const m = t.match(/ERROR:[^\n]*/); fail('shader rejected by this GPU driver: ' + (m ? m[0] : t.slice(0, 160)) + ' — ' + (renderer.getContext().getParameter(renderer.getContext().RENDERER) || '')); } }; }
 window.addEventListener('error', e => { if(!window.__shownErr){ window.__shownErr = 1; fail('error: ' + (e.message || e)); } });
@@ -2295,7 +2313,7 @@ strokeMeshes.pavilion = makeStrokeMesh(group);
 
 // the planned strokes: three float textures, one texel per stroke
 const stOpts = { type:THREE.FloatType, format:THREE.RGBAFormat, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false, generateMipmaps:false };
-const rtPlan = new THREE.WebGLMultipleRenderTargets(STATE_S,STATE_S,5,stOpts);
+const rtPlan = mrt(STATE_S,STATE_S,5,stOpts);
 
 // ---------------------------------------------------------------------------------------------------------------
 // The strokes' MEMORY. The plan (above) is the goal: the painting this view should have. What is painted is a separate
@@ -2474,7 +2492,7 @@ void main(){
     o2 = vec4(c, max(o2.w, 0.6)); o3 = vec4(1.0,0.0,0.0,0.0);
   }
 }`;
-const rtState = [0,1].map(()=>new THREE.WebGLMultipleRenderTargets(STATE_S,STATE_S,6,stOpts));
+const rtState = [0,1].map(()=>mrt(STATE_S,STATE_S,6,stOpts));
 let stateRead = 0, resetStrokes = true, noMemory = false;   // (noMemory: test hook, paint the plan directly)
 const stateMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
@@ -2978,6 +2996,7 @@ const finalMat = new THREE.ShaderMaterial({
 });
 const postCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
 const stateScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), stateMat); q.frustumCulled=false; stateScene.add(q); }
+splitMat(planMat); splitMat(planQMat); splitMat(stateMat);   // (only where the GPU has fewer than 6 outputs per pass)
 const resolveScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), resolveMat); q.frustumCulled=false; resolveScene.add(q); }
 const finalScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), finalMat); q.frustumCulled=false; finalScene.add(q); }
 
@@ -4059,7 +4078,7 @@ function render(dt){
     A.uProj.value.copy(camera.projectionMatrix); A.uNT.value = M.total; A.uDYaw.value = view.yaw - lastFullPlan.yaw; A.uDPitch.value = view.pitch - lastFullPlan.pitch; A.uAspect.value = W/H; A.uRes.value.set(W,H);
     renderer.setRenderTarget(rtAnch); renderer.render(anchScene, camera);   // (the scene camera: its viewMatrix and cameraPosition)
   } else {
-  renderer.setRenderTarget(rtPlan); renderer.setClearColor(CLEAR_ZERO, 0); renderer.render(OPT.quad ? planQScene : planScene, camera);
+  renderer.setClearColor(CLEAR_ZERO, 0); renderTo(rtPlan, OPT.quad ? planQScene : planScene, camera);
   lastFullPlan = { yaw:view.yaw, pitch:view.pitch };
   }
   if(__sync) __sync('plan');
@@ -4077,7 +4096,7 @@ function render(dt){
   for(let i=0;i<4;i++) SM['tW'+i].value = rtGlaze[i].texture; SM.uResP.value.set(W,H); SM.tRank.value = strokeMeshes[current].rankTex;   // (last frame's washes: where are holes?)
   SM.uDt.value = dt; SM.uReset.value = (resetStrokes || noMemory) ? 1 : 0; SM.uK.value = P.uK.value; SM.uRestT.value = restT; SM.uSpeed.value = viewSpeed;
   SM.uImgSpeed.value = viewSpeed*P.uFocal.value*Math.max(cfg.halfW, cfg.halfH)/dist;   // the fastest a point of the model moves on the paper
-  renderer.setRenderTarget(wrS); renderer.render(stateScene, postCam);
+  renderTo(wrS, stateScene, postCam);
   stateRead = 1-stateRead; resetStrokes = false;
   if(__sync) __sync('state');
   // 3. paint the strokes, each glaze into its own wash
