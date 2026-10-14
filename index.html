@@ -1932,7 +1932,7 @@ const STROKE_VS = `
 precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
-uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap, uFreshW, uSoakOnS, uFreshWL, uLineGrow, uDragK;
+uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap, uFreshW, uSoakOnS, uFreshWL, uLineGrow, uDragK, uSkyDryK;
 varying vec2 vLum; varying float vSoak; varying float vClip;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
@@ -1961,7 +1961,9 @@ void main(){
   vClip = layer < 3.5 ? 1.0 + layer : 0.0;   // (the model's own paint: wash, colour, shade, darks; 1 + its layer)
   // (and it never SOAKS IN all the way: its marks stay separate, wet on dry, even at rest — user: the turtle and the
   // cat fur "still too wet")
-  float soakT = uSoakOnS > 0.5 ? (layer > 5.5 ? uLineGrow : texelFetch(tS5,tx,0).z) : 1.0;   // (the SKY pans ~0.9 screens per radian: by its own pixel speed even a slow drag dried it — it follows the picture's wetness, i.e. the drag speed, instead)   // (the stroke's soak; 'continuous' motion: always soaked)
+  // (the SKY: the same rule as every stroke, its effect scaled for its distance — it pans ~0.9 screens per radian, so by
+  // its raw pixel speed a slow drag dried it: its soak is raised to the power uSkyDryK, i.e. drying as if it moved less)
+  float soakT = uSoakOnS > 0.5 ? (layer > 5.5 ? pow(texelFetch(tS5,tx,0).z, uSkyDryK) : texelFetch(tS5,tx,0).z) : 1.0;   // (the SKY pans ~0.9 screens per radian: by its own pixel speed even a slow drag dried it — it follows the picture's wetness, i.e. the drag speed, instead)   // (the stroke's soak; 'continuous' motion: always soaked)
   float soakS = min(soakT, 1.0 - uDryCap*mdry*(layer < 3.5 ? 1.0 : 0.0)); vSoak = soakS;
   // FRESH STROKES ARE A LITTLE THINNER (user: "the thickness slightly decrease as they move, to give the illusion that new
   // strokes are painted"): a stroke starts at uFreshW of its width and grows to full width as it soaks in (lines keep theirs)
@@ -2014,7 +2016,7 @@ void main(){
 
 // one brush mark into its glaze's wash buffer: rgb = pigment x amount x paint, a = paint (water) — merged later
 const STROKE_FS = `
-precision highp float;
+precision highp float; precision highp sampler2D;   // (the same sampler precision as STROKE_VS: the Pixel 10's PowerVR driver rejects a mismatch — tShapeS is in both)
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
 uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix, uOwnR; varying float vSoak; varying float vClip; uniform float uDbgSoak, uSoakMark, uClipM;
@@ -2267,7 +2269,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uDragK:{value:OPT.dragK !== undefined ? OPT.dragK : 0.5}, uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.05}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uSkyDryK:{value:OPT.skyDryK || 0.35}, uDragK:{value:OPT.dragK !== undefined ? OPT.dragK : 0.5}, uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.05}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -3153,7 +3155,10 @@ function loadPack(name, data, root, opt){
     imgs.forEach((im,k)=>{ const x=(k%G)*T, y=Math.floor(k/G)*T;
       cx.drawImage(im, x, y, T, T); });                   // (the shader samples a little inside each tile, so mipmaps don't bleed)
     let geo = await decodeMesh(d.mesh);
-    const dryK = dryKeys(geo);                           // (each material's dryness, found again on the final mesh)
+    const dryK = dryKeys(geo);
+    if(opt.cloudScale){ const u = geo.attributes.aUvT, ps = geo.attributes.position;   // (the model's cloud sea (unshaded tint) spread wider: no sky showing below it — user)
+      for(let i=0;i<u.count;i++) if(Math.abs(u.getZ(i) + 3) < 0.5){ ps.setX(i, ps.getX(i)*opt.cloudScale); ps.setZ(i, ps.getZ(i)*opt.cloudScale); ps.setY(i, ps.getY(i) - 0.15*(opt.cloudScale - 1)); }
+      ps.needsUpdate = true; }                           // (each material's dryness, found again on the final mesh)
     if(opt.regionShapes){ if(geo.userData.regions) geo.userData.grp = geo.userData.regions; else { const u = geo.attributes.aUvT, g = new Int32Array(u.count); for(let i=0;i<u.count;i++) g[i] = Math.round(u.getX(i)*4096); geo.userData.grp = g; } }   // (converted with --regions: each colour region a shape)
     if(opt.byColour) geo = splitByColour(geo, opt.byColour);
     if(opt.declutter) declutter(geo, opt.declutter);   // (the clutter left out: the Hill Castle's people, barrels and carts)
@@ -3671,7 +3676,7 @@ const MODELS = {
              pitchMin:0.25,   // (its hill stands in a painted ground, so the camera may circle low; not lower than this: the ground's far edge)
              fade:{ c:new THREE.Vector2(-0.25,-0.26), r:4.6, y:1.25 }, coverC:4.5, load:()=>loadPack('medieval', 'medieval', medievalGroup, { lift:(window.__OPT && window.__OPT.medLift) || 1.15, blocks:{ col:[212,196,168], tol:0.06, size:[0.62,0.30] }, areaPow:0.6, byColour:{ hue:0.10, minArea:0.00003, rounds:0 }, declutter:0.012, grass:0.5, ground:{ y:-0.55, grass:0.6, c:[-0.25,-0.26], r:4.4, col:[176,190,118], vary:{ cols:[[124,90,64]], tol:0.18, tone:0.60, hue:0.30, freq:0.8 }, skirt:{ cols:[[124,90,64],[176,190,118]], tol:0.16, wall:[124,90,64], dry:3, slope:0, amp:(window.__OPT && window.__OPT.skAmp) || 0.12, freq:(window.__OPT && window.__OPT.skFreq) || 7.0, facet:0.12, tone:0.55 }, foot:{ stone:[132,104,84], nStones:40, sStone:0.09, bush:[86,118,58], nBushes:70, sBush:0.11 } }, stones:{ n:80, s:0.06, col:[132,104,84], on:[176,190,118] }, bushes:{ n:300, s:0.10, col:[86,118,58], on:[176,190,118] }, dropOutside:{ c:[-0.25,-0.26], r:2.9 } }) },
   castle:  { root:()=>castleGroup, yaw:2.75, pitch:0.48, pitchMax:1.05,   // (from above it has no sky under it: bare paper)
-            target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:2.0, strokeK:0.55, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {regionShapes:true, skyAll:true, areaPow:0.6, lift:1.15, around:true}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
+            target:new THREE.Vector3(0,0.27,-0.28), halfW:2.0, halfH:1.75, shadeK:2.0, strokeK:0.55, shadowHalf:2.3, shadowCenter:new THREE.Vector3(0,0.2,-0.28), fade:{ c:new THREE.Vector2(0,-0.28), r:3.4, y:0.4 }, skyAll:true, load:()=>loadPack('castle', 'floating_castle', castleGroup, {cloudScale:2.2, regionShapes:true, skyAll:true, areaPow:0.6, lift:1.15, around:true}) }   // (it floats: no ground, no fade; one welded mesh of 26k triangles, so the auto detail (0.06) and brush were too coarse)
 };
 const CFG = {};
 // the sun is set as a painter sets up the subject: from the front-left of its OPENING view, high (three-quarter light),
