@@ -3115,6 +3115,14 @@ function loadPack(name, data, root, opt){
     if(opt.bushes) appendStones(geo, tileCol, Object.assign({ bush:true, seed:57 }, opt.bushes));
     if(opt.ground) addGround(root, geo, opt.ground.y, opt.ground.grass, opt.ground.r ? { c:opt.ground.c, r:opt.ground.r, col:floorCol, skirt:opt.ground.skirt, vary:opt.ground.vary, footStones:opt.ground.foot } : null, opt.ground.rk);
     if(opt.groundBushes) appendStones(geo, tileCol, Object.assign({ bush:true, seed:83 }, opt.groundBushes));   // (bushes on the model's OWN ground, added just above)
+    // (THE SAME GROUND AS EVERY OTHER PAINTING (user: "why the cat's grass is so different than the windmills?"): the model's own
+    // disc was painted as part of the model — its own green, broken into many colour strokes. It only placed the bushes; it is
+    // taken out again and the usual ground disc, in the palette's ground colour, is laid at the same place.)
+    if(opt.ground && opt.ground.std && geo.userData.disc){ const d = geo.userData.disc, ix = geo.index, keep = [];
+      for(let t=0;t<ix.count/3;t++){ const a = ix.getX(t*3); if(a >= d.start && a < d.end) continue; keep.push(a, ix.getX(t*3+1), ix.getX(t*3+2)); }
+      geo.setIndex(keep);
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(d.R, d.R*1.02, 0.02, 96), matFor('ground'));
+      disc.position.set(d.cx, d.y - 0.01, d.cz); disc.userData.role = 'ground'; root.add(disc); }
     if(opt.sea) addSea(root, geo, opt.sea);
     if(opt.skyAll) root.userData.skyAll = true;
     if(opt.areaPow) root.userData.areaPow = opt.areaPow;
@@ -3378,6 +3386,7 @@ function appendDisc(geo, cx, y, cz, R, col){
     P[j*3] = cx + (i === S ? 0 : Math.cos(a)*r); P[j*3+1] = y; P[j*3+2] = cz + (i === S ? 0 : Math.sin(a)*r); N[j*3+1] = 1; C.set(col, j*3); U[j*3+2] = -1; }
   const idx = Array.from(geo.index.array); for(let i=0;i<S;i++) idx.push(nV+S, nV+(i+1)%S, nV+i);
   (geo.userData.dryAdd = geo.userData.dryAdd || []).push([nV, S+1, 1]);   // (a grass floor: level 1)
+  geo.userData.disc = { start:nV, end:nV+S+1, cx, cz, y, R };   // (kept for placing bushes on it; see loadPack: ground.std)
   geo.setAttribute('position', new THREE.BufferAttribute(P,3)); geo.setAttribute('normal', new THREE.BufferAttribute(N,3));
   geo.setAttribute('aCol', new THREE.BufferAttribute(C,3)); geo.setAttribute('aUvT', new THREE.BufferAttribute(U,3)); geo.setIndex(idx);
   if(geo.userData.grp){ const g = new Int32Array(nV+S+1); g.set(geo.userData.grp); let m = 0; for(const v of geo.userData.grp) m = Math.max(m, v); g.fill(m+1, nV); geo.userData.grp = g; }
@@ -3598,7 +3607,7 @@ const MODELS = {
             yaw:0.10, pitch:0.26, target:new THREE.Vector3(0,0.0,0), halfW:5.2, halfH:3.6,   // (framed on the CATS, not their meadow: zoom works as in the other paintings)
             shadeK:1.0, marks:1.0, colK:0.6, coarseK:1, shadowOwn:0.75,   // (drier fur strokes: the fur MATERIAL is dry, from the converter)
                // (soft round animals: painted wet, shade in their own colour)   // (its fur patches are its pattern: kept, not averaged away)
-            zoomMin:0.75, zoomMax:2.2, load:()=>loadPack('cats', 'cats', catsGroup, { areaPow:0.55, skyK:1.6, features:{ whisker:1.3, maxLen:1.5, eyeMax:0.25 }, ground:{ y:-2.19, c:[0,0], r:11, col:[150,172,108], grass:0.9 }, groundBushes:{ n:46, s:0.55, col:[88,122,62], on:[150,172,108], avoid:{ c:[0,0], r:5.2 }, within:{ c:[0,0], r:7.6 } } }) },
+            zoomMin:0.75, zoomMax:2.2, load:()=>loadPack('cats', 'cats', catsGroup, { areaPow:0.55, skyK:1.6, features:{ whisker:1.3, maxLen:1.5, eyeMax:0.25 }, ground:{ y:-2.19, c:[0,0], r:11, col:[150,172,108], grass:0.9, std:true }, groundBushes:{ n:46, s:0.55, col:[88,122,62], on:[150,172,108], avoid:{ c:[0,0], r:5.2 }, within:{ c:[0,0], r:7.6 } } }) },
   medieval:{ root:()=>medievalGroup, target:new THREE.Vector3(-0.25,1.30,-0.20), halfW:2.3, halfH:2.0, yaw:0.35, pitch:0.90, shadeK:1.4, strokeK:0.55, shadowHalf:4.2, shadowCenter:new THREE.Vector3(-0.25,0.4,-0.25),   // (the shadow map on the hill and castle, not the painted ground round it: 2x finer, no blocky shade)
                // (framed on the CASTLE, as the Lighthouse is on its tower: the brush follows the framing; zoom out for the hill)
             
