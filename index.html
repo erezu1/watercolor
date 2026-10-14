@@ -98,26 +98,45 @@ canvas:active{cursor:grabbing}
 .hint .hw-title{font-size:26px;font-weight:500;line-height:1.15;text-wrap:balance;font-variation-settings:'opsz' 72;color:var(--card-title)}
 .hint .hw-sub{font-size:14.5px;opacity:.7}
 /* (while the first painting loads: three watercolor strokes paint themselves, one after another, and dry away) */
-.hw-brush{width:250px;height:90px;overflow:visible}
-.hw-brush g{mix-blend-mode:var(--brush-blend)}
-/* (a tiny landscape paints itself, as a sketch is begun: sky wash, far hill, sun blooming wet, near hill, tree dabs;
-   then it dries away and begins again — one 5 s timeline) */
-.hl{fill:none;stroke-width:var(--w);stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:5s cubic-bezier(.45,.05,.35,1) infinite}
-/* (each stroke goes down DRY — a little narrow and strong — then soaks in over ~0.8 s: it spreads wider and lighter, as wet
-   paint bleeds into the paper; the same idea as the painting's own 'draw' motion) */
-.hl-sky{stroke:#a9c6df;--w:20px;animation-name:hlSky}
-.hl-far{stroke:#7f9cc0;--w:10px;animation-name:hlFar}
-.hl-near{stroke:#9db27a;--w:17px;animation-name:hlNear}
-.hl-t1,.hl-t2,.hl-t3{stroke:#5f7a55;--w:8px}
-.hl-t1{animation-name:hlT1}.hl-t2{animation-name:hlT2}.hl-t3{animation-name:hlT3}
-.hint svg .hl-sun,.hl-sun{fill:#e8b25e;stroke:none;transform-box:fill-box;transform-origin:center;animation:hlSun 5s ease-out infinite}   /* (no outline: '.hint svg' strokes everything) */
-@keyframes hlSky{0%{stroke-dashoffset:1;opacity:.55;stroke-width:calc(var(--w)*.78)}16%{stroke-dashoffset:0;opacity:.55;stroke-width:calc(var(--w)*.78)}32%{opacity:.42;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.36;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
-@keyframes hlFar{0%,12%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.75)}12.5%{stroke-dashoffset:.99;opacity:.7;stroke-width:calc(var(--w)*.75)}28%{stroke-dashoffset:0;opacity:.7;stroke-width:calc(var(--w)*.75)}44%{opacity:.55;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.48;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
-@keyframes hlSun{0%,26%{transform:scale(0);opacity:.0}29%{opacity:.8}40%{transform:scale(.85);opacity:.8}56%{transform:scale(1);opacity:.6}84%{transform:scale(1.08);opacity:.5}96%,100%{transform:scale(1.08);opacity:0}}
-@keyframes hlNear{0%,34%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.78)}34.5%{stroke-dashoffset:.99;opacity:.78;stroke-width:calc(var(--w)*.78)}50%{stroke-dashoffset:0;opacity:.78;stroke-width:calc(var(--w)*.78)}66%{opacity:.62;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.55;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
-@keyframes hlT1{0%,52%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.7)}52.5%{stroke-dashoffset:.99;opacity:.9;stroke-width:calc(var(--w)*.7)}57%{stroke-dashoffset:0;opacity:.9;stroke-width:calc(var(--w)*.7)}70%{opacity:.75;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.65;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
-@keyframes hlT2{0%,56%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.7)}56.5%{stroke-dashoffset:.99;opacity:.9;stroke-width:calc(var(--w)*.7)}61%{stroke-dashoffset:0;opacity:.9;stroke-width:calc(var(--w)*.7)}74%{opacity:.75;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.65;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
-@keyframes hlT3{0%,60%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.7)}60.5%{stroke-dashoffset:.99;opacity:.9;stroke-width:calc(var(--w)*.7)}65%{stroke-dashoffset:0;opacity:.9;stroke-width:calc(var(--w)*.7)}78%{opacity:.75;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.65;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
+/* THE LOADING LANDSCAPE, on the COMPOSITOR: every stroke only MOVES (transform) and FADES (opacity) — the two things a
+   browser animates off the main thread — so it keeps painting while the page is busy loading a model (drawn with
+   stroke-dashoffset/stroke-width it froze with the main thread). A stroke is REVEALED left to right — its layer slides in
+   while its contents slide back the same amount, so the brush mark itself stays put (no stretching) — narrow and strong,
+   then soaks in: wider and lighter. One 5 s timeline */
+.hw-brush{position:relative;display:block;width:250px;height:90px;margin:0 auto}
+.hw-defs{position:absolute}
+.hw-brush .L{position:absolute;inset:0;overflow:hidden;opacity:0;will-change:transform,opacity;mix-blend-mode:var(--brush-blend)}
+.hw-brush .Li,.hw-brush .S{position:absolute;inset:0;width:100%;height:100%;overflow:visible;will-change:transform}
+.hw-brush .L,.hw-brush .Li,.hw-brush .S{animation-duration:5s;animation-timing-function:cubic-bezier(.45,.05,.35,1);animation-iteration-count:infinite}
+.hw-brush path{fill:none;stroke-linecap:round}
+.L-sky path{stroke:#a9c6df;stroke-width:20px}.L-far path{stroke:#7f9cc0;stroke-width:10px}.L-near path{stroke:#9db27a;stroke-width:17px}
+.L-t1 path,.L-t2 path,.L-t3 path{stroke:#5f7a55;stroke-width:8px}
+.hint svg .L-sun circle,.L-sun circle{fill:#e8b25e;stroke:none}
+.L-sun{overflow:visible}
+.L-sky{animation-name:osky}.L-sky>.Li{animation-name:isky}.L-sky .S{transform-origin:50% 27.8%;animation-name:ssky}
+@keyframes osky{0%,0%{transform:translateX(-100%);opacity:0}0.5%{transform:translateX(-96%);opacity:0.55}16%{transform:none;opacity:0.55}32%{transform:none;opacity:0.42}84%{transform:none;opacity:0.36}96%,100%{transform:none;opacity:0}}
+@keyframes isky{0%,0%{transform:translateX(100%)}0.5%{transform:translateX(96%)}16%,100%{transform:none}}
+@keyframes ssky{0%,16%{transform:scaleY(0.78)}32%,100%{transform:none}}
+.L-far{animation-name:ofar}.L-far>.Li{animation-name:ifar}.L-far .S{transform-origin:50% 61.1%;animation-name:sfar}
+@keyframes ofar{0%,12%{transform:translateX(-100%);opacity:0}12.5%{transform:translateX(-96%);opacity:0.7}28%{transform:none;opacity:0.7}44%{transform:none;opacity:0.55}84%{transform:none;opacity:0.48}96%,100%{transform:none;opacity:0}}
+@keyframes ifar{0%,12%{transform:translateX(100%)}12.5%{transform:translateX(96%)}28%,100%{transform:none}}
+@keyframes sfar{0%,28%{transform:scaleY(0.75)}44%,100%{transform:none}}
+.L-sun{animation-name:osun}.L-sun .S{transform-origin:75% 30.6%;animation-name:ssun}
+@keyframes osun{0%,26%{opacity:0}29%{opacity:.8}40%{opacity:.8}56%{opacity:.6}84%{opacity:.5}96%,100%{opacity:0}}
+@keyframes ssun{0%,26%{transform:scale(0)}40%{transform:scale(.85)}56%{transform:scale(1)}84%,100%{transform:scale(1.08)}}
+.L-near{animation-name:onear}.L-near>.Li{animation-name:inear}.L-near .S{transform-origin:50% 80.6%;animation-name:snear}
+@keyframes onear{0%,34%{transform:translateX(-100%);opacity:0}34.5%{transform:translateX(-96%);opacity:0.78}50%{transform:none;opacity:0.78}66%{transform:none;opacity:0.62}84%{transform:none;opacity:0.55}96%,100%{transform:none;opacity:0}}
+@keyframes inear{0%,34%{transform:translateX(100%)}34.5%{transform:translateX(96%)}50%,100%{transform:none}}
+@keyframes snear{0%,50%{transform:scaleY(0.78)}66%,100%{transform:none}}
+.L-t1{animation-name:ot1}.L-t1 .S{transform-origin:21.0% 77.8%;animation-name:st1}
+@keyframes ot1{0%,52%{opacity:0}52.5%{opacity:.9}70%{opacity:.75}84%{opacity:.65}96%,100%{opacity:0}}
+@keyframes st1{0%,52%{transform:scale(.7,0)}57%{transform:scale(.7,1)}70%,100%{transform:none}}
+.L-t2{animation-name:ot2}.L-t2 .S{transform-origin:25.5% 79.2%;animation-name:st2}
+@keyframes ot2{0%,56%{opacity:0}56.5%{opacity:.9}74%{opacity:.75}84%{opacity:.65}96%,100%{opacity:0}}
+@keyframes st2{0%,56%{transform:scale(.7,0)}61%{transform:scale(.7,1)}74%,100%{transform:none}}
+.L-t3{animation-name:ot3}.L-t3 .S{transform-origin:68.5% 77.8%;animation-name:st3}
+@keyframes ot3{0%,60%{opacity:0}60.5%{opacity:.9}78%{opacity:.75}84%{opacity:.65}96%,100%{opacity:0}}
+@keyframes st3{0%,60%{transform:scale(.7,0)}65%{transform:scale(.7,1)}78%,100%{transform:none}}
 .hint.welcome .hint-welcome{opacity:1}
 .hint.welcome .hint-anims,.hint.welcome .hint-text{opacity:0;transition:none}
 @keyframes hintSwipe{0%,100%{transform:translateX(-30px)}50%{transform:translateX(30px)}}
@@ -228,7 +247,7 @@ body.menu-open .toast{opacity:0}
 body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 .about{margin:0;font-size:14px;font-style:italic;line-height:1.4;color:var(--ink-soft);text-align:center}
 .pick-btn:focus-visible,.choices button:focus-visible,.mood:focus-visible,.peek:focus-visible,canvas:focus-visible{outline:2px solid #4a5da8;outline-offset:2px}
-@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hl,.hl-sun{animation:none;stroke-dashoffset:0;opacity:.55}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
+@media (prefers-reduced-motion:reduce){.pick-btn .i-open,.pick-btn .i-close,.menu-btn .i-open,.menu-btn .i-close{transition:none}.hint .hint-hand,.hint .hint-f1,.hint .hint-f2{animation:none}.hw-brush .L,.hw-brush .Li,.hw-brush .S{animation:none;transform:none}.hw-brush .L{opacity:.55}.hint,.toast,.hint .hint-anims,.hint .hint-text,.hint .hint-welcome{transition:none}.panel,.panel.closing{animation:none}}
 </style>
 
 </head>
@@ -238,16 +257,7 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
   <div class="hint welcome" id="hint" aria-hidden="true">
     <span class="hint-welcome">
       <span class="hw-title">Welcome to 3D paintings</span>
-      <svg class="hw-brush" viewBox="0 0 200 72" aria-hidden="true">
-        <defs><filter id="wcEdge" x="-10%" y="-40%" width="120%" height="180%"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="7"/><feGaussianBlur stdDeviation="0.6"/></filter></defs>
-        <g filter="url(#wcEdge)">
-          <path class="hl hl-sky" pathLength="1" d="M10 20 C60 13 140 13 190 20"/>
-          <path class="hl hl-far" pathLength="1" d="M12 50 C46 36 84 36 114 44 C144 52 170 42 188 38"/>
-          <circle class="hl-sun" cx="150" cy="22" r="8"/>
-          <path class="hl hl-near" pathLength="1" d="M10 63 C60 50 124 55 190 62"/>
-          <path class="hl hl-t1" pathLength="1" d="M42 56 L42 49"/><path class="hl hl-t2" pathLength="1" d="M51 57 L51 52"/><path class="hl hl-t3" pathLength="1" d="M137 56 L137 47"/>
-        </g>
-      </svg>
+      <div class="hw-brush" aria-hidden="true"><svg class="hw-defs" width="0" height="0"><defs><filter id="wcEdge" filterUnits="userSpaceOnUse" x="-20" y="-20" width="240" height="112"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="7"/><feGaussianBlur stdDeviation="0.6"/></filter></defs></svg><div class="L L-sky"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M10 20 C60 13 140 13 190 20"/></g></svg></div></div><div class="L L-far"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M12 50 C46 36 84 36 114 44 C144 52 170 42 188 38"/></g></svg></div></div><div class="L L-sun"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><circle cx="150" cy="22" r="8"/></g></svg></div></div><div class="L L-near"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M10 63 C60 50 124 55 190 62"/></g></svg></div></div><div class="L L-t1"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M42 56 L42 49"/></g></svg></div></div><div class="L L-t2"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M51 57 L51 52"/></g></svg></div></div><div class="L L-t3"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M137 56 L137 47"/></g></svg></div></div></div>
       <span class="hw-sub">Mixing the paints…</span>
     </span>
     <div class="hint-anims">
@@ -261,13 +271,7 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
   </div>
   <div class="hint loadcard" id="loadcard" aria-live="polite">
     <span class="hw-title" id="loadTitle"></span>
-    <svg class="hw-brush" viewBox="0 0 200 72" aria-hidden="true"><g filter="url(#wcEdge)">
-          <path class="hl hl-sky" pathLength="1" d="M10 20 C60 13 140 13 190 20"/>
-          <path class="hl hl-far" pathLength="1" d="M12 50 C46 36 84 36 114 44 C144 52 170 42 188 38"/>
-          <circle class="hl-sun" cx="150" cy="22" r="8"/>
-          <path class="hl hl-near" pathLength="1" d="M10 63 C60 50 124 55 190 62"/>
-          <path class="hl hl-t1" pathLength="1" d="M42 56 L42 49"/><path class="hl hl-t2" pathLength="1" d="M51 57 L51 52"/><path class="hl hl-t3" pathLength="1" d="M137 56 L137 47"/>
-        </g></svg>
+    <div class="hw-brush" aria-hidden="true"><div class="L L-sky"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M10 20 C60 13 140 13 190 20"/></g></svg></div></div><div class="L L-far"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M12 50 C46 36 84 36 114 44 C144 52 170 42 188 38"/></g></svg></div></div><div class="L L-sun"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><circle cx="150" cy="22" r="8"/></g></svg></div></div><div class="L L-near"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M10 63 C60 50 124 55 190 62"/></g></svg></div></div><div class="L L-t1"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M42 56 L42 49"/></g></svg></div></div><div class="L L-t2"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M51 57 L51 52"/></g></svg></div></div><div class="L L-t3"><div class="Li"><svg class="S" viewBox="0 0 200 72"><g filter="url(#wcEdge)"><path d="M137 56 L137 47"/></g></svg></div></div></div>
   </div>
   <div class="fail" id="fail">This painting needs WebGL 2, which your browser doesn’t seem to offer.</div>
 </div>
