@@ -1387,9 +1387,9 @@ void main(){
       float up = smoothstep(-0.2, 0.9, vPos.y);
       // (the same sky strokes as the other paintings — their colour, clouds left as paper — only stronger and all the way
       // down: the subject floats in it)
-      float fallA = max(fall, 0.55 + 0.45*up);
-      col = -log(clamp(mix(uSkyB, uSkyA, 0.75 + 0.25*up), 0.05, 1.0))*1.5;   // (blue, not the horizon haze; no painted clouds here — the model's own clouds are below)
-      amount = (on && texture2D(tData, uvS).a < 0.5) ? 0.55*1.9*fallA*(0.75 + 0.5*rr.y)*(1.0 + 0.6*nearSubj)*(1.0 - 0.85*cl*(1.0 - nearSubj)*(1.0 - up)) : 0.0;   // (a few gaps of paper low down: light, open)   // (each stroke its own strength)
+      float fallA = max(fall, 0.35 + 0.45*up);   // (fainter, like the other paintings' skies — user)
+      col = -log(clamp(mix(uSkyB, uSkyA, 0.75 + 0.25*up), 0.05, 1.0))*1.1;   // (blue, not the horizon haze; no painted clouds here — the model's own clouds are below)
+      amount = (on && texture2D(tData, uvS).a < 0.5) ? 0.55*1.15*fallA*(0.75 + 0.5*rr.y)*(1.0 + 0.6*nearSubj)*(1.0 - 0.85*cl*(1.0 - nearSubj)*(1.0 - up)) : 0.0;   // (a few gaps of paper low down: light, open)   // (each stroke its own strength)
     }
     vis = on ? 1.0 : 0.0;
   } else if(isWire){
