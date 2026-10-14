@@ -428,6 +428,8 @@ if(!renderer.capabilities.isWebGL2){ fail(); return; }
   const mdb = gl.getParameter(gl.MAX_DRAW_BUFFERS); if(mdb < 6) miss.push('6 draw buffers (has '+mdb+')');
   if(typeof DecompressionStream === 'undefined') miss.push('DecompressionStream (browser too old)');
   if(miss.length){ fail(miss.join(' · ') + ' — ' + (gl.getParameter(gl.RENDERER) || '')); return; } }
+{ const ce = console.error.bind(console); console.error = (...a) => { ce(...a); const t = a.map(String).join(' ');   // (a shader the GPU's driver rejects: say so, with the first line of the log)
+    if(/Shader Error|VALIDATE_STATUS|not compiled/.test(t) && !window.__shownErr){ window.__shownErr = 1; const m = t.match(/ERROR:[^\n]*/); fail('shader rejected by this GPU driver: ' + (m ? m[0] : t.slice(0, 160)) + ' — ' + (renderer.getContext().getParameter(renderer.getContext().RENDERER) || '')); } }; }
 window.addEventListener('error', e => { if(!window.__shownErr){ window.__shownErr = 1; fail('error: ' + (e.message || e)); } });
 renderer.setPixelRatio(1);
 const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
