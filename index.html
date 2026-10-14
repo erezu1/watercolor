@@ -1474,7 +1474,10 @@ void main(){
     fall = max(fall, 0.7*nearSubj*smoothstep(0.15, 0.45, uvS.y));
     float clK = cl*(1.0-nearSubj);                       // clouds are left as paper, but never right against the subject
     col = col*(1.0-0.94*clK) + uShadow*1.1*clK*(1.0-cl2);
-    amount = (on && texture2D(tData, uvS).a < 0.5) ? 0.55*fall*(1.0 + 0.6*nearSubj) : 0.0;
+    // (NO SKY LOOKING DOWN, user: from above the top of the picture is ground, not sky — by where this pixel's ray points:
+    // its elevation is the screen angle above centre minus the view's pitch; at the usual views nothing changes)
+    float elevS = atan((uvS.y - 0.5)*uRes.y/max(uFocal, 1.0)) - uPitch, aboveS = smoothstep(-0.75, -0.35, elevS);
+    amount = (on && texture2D(tData, uvS).a < 0.5) ? 0.55*fall*(1.0 + 0.6*nearSubj)*aboveS : 0.0;
     if(uSkyAll > 0.5){
       // A SUBJECT IN THE AIR (the Floating Castle): a clear sky all round, deeper blue upwards, no painted clouds (its
       // clouds are the model's own); pinned to the sky like the rest
@@ -1483,7 +1486,7 @@ void main(){
       // down: the subject floats in it)
       float fallA = max(fall, 0.35 + 0.45*up);   // (fainter, like the other paintings' skies — user)
       col = -log(clamp(mix(uSkyB, uSkyA, 0.75 + 0.25*up), 0.05, 1.0))*1.1;   // (blue, not the horizon haze; no painted clouds here — the model's own clouds are below)
-      amount = (on && texture2D(tData, uvS).a < 0.5) ? 0.55*1.15*fallA*(0.75 + 0.5*rr.y)*(1.0 + 0.6*nearSubj)*(1.0 - 0.85*cl*(1.0 - nearSubj)*(1.0 - up)) : 0.0;   // (a few gaps of paper low down: light, open)   // (each stroke its own strength)
+      amount = (on && texture2D(tData, uvS).a < 0.5) ? 0.55*1.15*fallA*(0.75 + 0.5*rr.y)*(1.0 + 0.6*nearSubj)*(1.0 - 0.85*cl*(1.0 - nearSubj)*(1.0 - up))*aboveS : 0.0;   // (a few gaps of paper low down: light, open)   // (each stroke its own strength)
     }
     vis = on ? 1.0 : 0.0;
   } else if(isWire){
