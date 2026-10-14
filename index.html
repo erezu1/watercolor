@@ -1968,8 +1968,7 @@ void main(){
   // FRESH STROKES ARE A LITTLE THINNER (user: "the thickness slightly decrease as they move, to give the illusion that new
   // strokes are painted"): a stroke starts at uFreshW of its width and grows to full width as it soaks in (lines keep theirs)
   // (width by speed through the soak, which falls with it: a very fast turn starts the marks as almost nothing — user)
-  if(layer < 4.5 || layer > 5.5) hw *= mix(uFreshW, 1.0, soakT*sqrt(soakT));
-  else hw *= mix(uFreshWL, 1.0, uLineGrow*sqrt(uLineGrow));   // (LINES are always dry: they follow the turn itself — thinner still while it moves, back to full width as the picture soaks in)
+  hw *= mix(uFreshW, 1.0, soakT*sqrt(soakT));   // (every stroke, lines too: one rule)   // (LINES are always dry: they follow the turn itself — thinner still while it moves, back to full width as the picture soaks in)
   // SOAK, a basic rule of the movement for EVERY stroke — the sky's too (user: "for all strokes this rule should be a basic part
   // of the movement engine"): fresh paint is DRY — crisp, broken by the bristles — and soaks in once the view is still
   { wet *= mix(uSoakMin, 1.0, soakS); dry = max(dry, (layer < 0.5 || layer > 5.5 ? 0.7 : 0.9)*(1.0 - soakS)); }
@@ -2344,7 +2343,8 @@ void stateMain(){
   bool lineQ = abs(q3.z - 1.25) < 0.01 || (abs(q3.x - 1.0) + abs(q3.y - 1.0) + abs(q3.z) < 0.01 && abs(q3.w - 2.0) < 0.01);
   bool lineP = abs(p3.z - 1.25) < 0.01 || (abs(p3.x - 1.0) + abs(p3.y - 1.0) + abs(p3.z) < 0.01 && abs(p3.w - 2.0) < 0.01);
   if(uLineSnap > 0.5 && (lineP || lineQ)){   // (both kinds of line: a formed rod (z 1.25) and a gap-filling line; also when it was one last frame)
-    if(on){ o0 = p0; o1 = vec4(0.0, p1.yzw); o2 = p2; o3 = p3; o4 = vec4(0.0, p4.xy, 1.0); } else clearOut(); return; }   // (a snapped line stays dry: soak 0)
+    if(on){ o0 = p0; o1 = vec4(0.0, p1.yzw); o2 = p2; o3 = p3; o4 = vec4(0.0, p4.xy, 1.0);
+      o5 = vec4(0.0, 0.0, uSoakOn < 0.5 ? 1.0 : (q1.w > 0.5 ? soakAt(soakQ, length(p0.xy - q0.xy)) : uBirthSoak), 0.0); } else clearOut(); return; }   // (a snapped LINE: the same soak rule as every stroke, by how far it moved)
   float rk = texelFetch(tRank, tx, 0).r; float h = hash(vec2(mod(rk, 320.0), floor(rk/320.0)));   // (the stroke's own random moment, from its place in the old shuffled order)
   bool moving = uRestT < 0.08 + 0.25*h;                  // (user: after the movement stops, everything is done within ~1 s)                   // (each stroke notices the hand has stopped at its own moment)
   float sizeG = p1.y + 2.0*p1.z;
