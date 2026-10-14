@@ -1921,7 +1921,7 @@ const STROKE_VS = `
 precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
-uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap, uFreshW, uSoakOnS, uFreshWL, uLineGrow;
+uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap, uFreshW, uSoakOnS, uFreshWL, uLineGrow, uDragK;
 varying vec2 vLum; varying float vSoak; varying float vClip;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
@@ -1974,6 +1974,10 @@ void main(){
   float thin = 1.0 - smoothstep(2.5, 6.0, hw/(uRes.y/700.0));   // (a fine line, e.g. a cable or a dark accent)
   P += D*back + n*position.y*hw*1.18*(0.3*back + (dissolving ? 0.35 : 0.0))*thin;   // the water spreads a line as it washes out
   vTr = vec2(back, length(D)/(length(D) + 2.0*hw + 1e-3));   // (x: 1 on the old side; y: how much of the mark is trail)
+  // DRAGGED ALONG (user: "besides thinning, thicken the stroke in the direction of the movement"): a fresh, moving mark is
+  // drawn out along the way it moves, by up to uDragK at full dryness — thinner across, longer along, as a brush dragged
+  if(length(D) > 0.3 && uSoakOnS > 0.5){ vec2 uM = -D/length(D), cM = a.xy + arcOff(a.z, a.w, 0.5*(s0 + s1));
+    P += uM*dot(P - cM, uM)*uDragK*(1.0 - soakT); gl_Position = vec4(P/uRes*2.0-1.0, 0.0, 1.0); }
   vDis = dissolving ? 1.0 : 0.0; vThin = thin;
   gl_Position = vec4(P/uRes*2.0-1.0, 0.0, 1.0);
   float half_ = 0.5*(s1-s0) + hw;
@@ -2252,7 +2256,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.05}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uDragK:{value:OPT.dragK !== undefined ? OPT.dragK : 0.5}, uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.05}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -2284,7 +2288,7 @@ const STATE_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tP0; uniform sampler2D tP1; uniform sampler2D tP2; uniform sampler2D tP3; uniform sampler2D tP4;
 uniform sampler2D tQ0; uniform sampler2D tQ1; uniform sampler2D tQ2; uniform sampler2D tQ3; uniform sampler2D tQ4; uniform sampler2D tQ5;
-uniform float uDt, uReset, uK, uDbgS, uRestT, uSpeed, uImgSpeed, uLineSnap, uSoakT, uTrailT, uDryPx, uSoakOn, uDryV;
+uniform float uDt, uReset, uK, uDbgS, uRestT, uSpeed, uImgSpeed, uLineSnap, uSoakT, uTrailT, uDryPx, uSoakOn, uDryV, uDryT, uBirthSoak;
 uniform sampler2D tW0; uniform sampler2D tW1; uniform sampler2D tW2; uniform sampler2D tW3; uniform vec2 uResP; uniform sampler2D tRank;   // last frame's washes   // (uImgSpeed: how fast the picture itself moves, px/s)
 layout(location=0) out highp vec4 o0;
 layout(location=1) out highp vec4 o1;
@@ -2308,7 +2312,7 @@ float flag(float f, float b){ return mod(floor(f/b), 2.0); }
 // soak target falls with how fast it moves on the screen, 1/(1 + (v/uDryV)^4) — a slow drag ~1, a fast one ~0; it dries
 // to the target at once and soaks back toward it over uSoakT)
 float soakAt(float soakNow, float movedPx){ if(uSoakOn < 0.5) return 1.0; float v = movedPx/max(uDt, 1e-3), r = v/uDryV, t = 1.0/(1.0 + r*r*r*r);
-  return soakNow > t ? t : soakNow + (t - soakNow)*(1.0 - exp(-uDt/max(uSoakT, 0.02))); }
+  return soakNow + (t - soakNow)*(1.0 - exp(-uDt/max(soakNow > t ? uDryT : uSoakT, 0.02))); }   // (it dries over uDryT: a short flick barely changes the picture)
 void stateMain(){
   ivec2 tx = ivec2(gl_FragCoord.xy);
   vec4 p0 = texelFetch(tP0,tx,0), p1 = texelFetch(tP1,tx,0), p2 = texelFetch(tP2,tx,0), p3 = texelFetch(tP3,tx,0), p4 = texelFetch(tP4,tx,0);
@@ -2416,7 +2420,7 @@ void stateMain(){
     if(length(D) > Dmax) D *= Dmax/length(D);
     if(length(D) < 0.3) D = vec2(0.0);
     // (paint that moved at all is fresh: dry)
-    o5 = vec4(D, uSoakOn < 0.5 ? 1.0 : growing ? 0.0 : soakAt(soakQ, length(moved)), 0.0);   // (ONE rule for every stroke: it dries in proportion to how far it moved on the screen — not against its own width, which left big washes and the sky wet; each kind then soaks back to its own wetness)
+    o5 = vec4(D, uSoakOn < 0.5 ? 1.0 : growing ? uBirthSoak : soakAt(soakQ, length(moved)), 0.0);   // (ONE rule for every stroke: it dries in proportion to how far it moved on the screen — not against its own width, which left big washes and the sky wet; each kind then soaks back to its own wetness)
     float Ln = length(nB - nA);
     // colour, width, strength: while the hand moves only a clear change is followed (and then all the way);
     // when it rests, everything settles exactly to the goal
@@ -2453,7 +2457,7 @@ let stateRead = 0, resetStrokes = true, noMemory = false;   // (noMemory: test h
 const stateMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
   uniforms:{ tP0:{value:rtPlan.texture[0]}, tP1:{value:rtPlan.texture[1]}, tP2:{value:rtPlan.texture[2]}, tP3:{value:rtPlan.texture[3]}, tP4:{value:rtPlan.texture[4]},
-             tQ0:{value:null}, tQ1:{value:null}, tQ2:{value:null}, tQ3:{value:null}, tQ4:{value:null}, tQ5:{value:null}, uDt:{value:1/60}, uReset:{value:1}, uK:{value:1}, uDbgS:{value:0}, uRestT:{value:10}, uSoakT:{value:OPT.soakT !== undefined ? OPT.soakT : 0.6}, uTrailT:{value:OPT.trailT !== undefined ? OPT.trailT : 0.03}, uDryPx:{value:OPT.dryPx || 4}, uDryV:{value:OPT.dryV || 70}, uSoakOn:{value:1}, uSpeed:{value:0}, uImgSpeed:{value:0}, uLineSnap:{value:OPT.lineSnap === 0 ? 0 : 1},
+             tQ0:{value:null}, tQ1:{value:null}, tQ2:{value:null}, tQ3:{value:null}, tQ4:{value:null}, tQ5:{value:null}, uDt:{value:1/60}, uReset:{value:1}, uK:{value:1}, uDbgS:{value:0}, uRestT:{value:10}, uSoakT:{value:OPT.soakT !== undefined ? OPT.soakT : 0.6}, uTrailT:{value:OPT.trailT !== undefined ? OPT.trailT : 0.03}, uDryPx:{value:OPT.dryPx || 4}, uDryV:{value:OPT.dryV || 260}, uDryT:{value:OPT.dryT || 0.45}, uBirthSoak:{value:1}, uSoakOn:{value:1}, uSpeed:{value:0}, uImgSpeed:{value:0}, uLineSnap:{value:OPT.lineSnap === 0 ? 0 : 1},
              tW0:{value:null}, tW1:{value:null}, tW2:{value:null}, tW3:{value:null}, uResP:{value:new THREE.Vector2(1,1)}, tRank:{value:null} },
   vertexShader:`void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader:STATE_FS,
   depthTest:false, depthWrite:false, blending:THREE.NoBlending
@@ -4064,7 +4068,7 @@ function render(dt){
   renderer.setRenderTarget(rtWet[1]); renderer.render(wetScene, postCam);
   if(__sync) __sync('wet1');
   const Rz = resolveMat.uniforms; resCur = 1-resCur;
-  Rz.tEprev.value = rtRes[1-resCur].texture[1]; Rz.tAprev.value = rtRes[1-resCur].texture[0]; Rz.uDtR.value = dt; Rz.uResetR.value = wasReset ? 1 : 0; Rz.uRestR.value = restT; { const v = viewSpeed*0.5*H/(OPT.dryV || 70), t = 1/(1 + v*v*v*v); wetNow = OPT.motion === 'cont' ? 1 : wetNow > t ? t : wetNow + (t - wetNow)*(1 - Math.exp(-dt/(OPT.soakT !== undefined ? OPT.soakT : 0.6))); } Rz.uWetNow.value = wetNow; strokeMat.uniforms.uLineGrow.value = wetNow;   // (the blending dries by how far the picture moved, in px, and soaks back like the strokes)
+  Rz.tEprev.value = rtRes[1-resCur].texture[1]; Rz.tAprev.value = rtRes[1-resCur].texture[0]; Rz.uDtR.value = dt; Rz.uResetR.value = wasReset ? 1 : 0; Rz.uRestR.value = restT; { const v = viewSpeed*0.5*H/(OPT.dryV || 260), t = 1/(1 + v*v*v*v); wetNow = OPT.motion === 'cont' ? 1 : wetNow + (t - wetNow)*(1 - Math.exp(-dt/(wetNow > t ? (OPT.dryT || 0.45) : (OPT.soakT !== undefined ? OPT.soakT : 0.6)))); } Rz.uWetNow.value = wetNow; { const v = viewSpeed*0.5*H/(OPT.dryV || 260); stateMat.uniforms.uBirthSoak.value = 1/(1 + v*v*v*v); }   // (a new stroke is born as wet as the view's speed allows: slow scrolling stays continuous) strokeMat.uniforms.uLineGrow.value = wetNow;   // (the blending dries by how far the picture moved, in px, and soaks back like the strokes)
   renderer.setRenderTarget(rtRes[resCur]); renderer.render(resolveScene, postCam);
   finalMat.uniforms.tAbs.value = rtRes[resCur].texture[0];
   if(__sync) __sync('resolve');
