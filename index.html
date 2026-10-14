@@ -2004,7 +2004,7 @@ const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix, uOwnR; varying float vSoak; varying float vClip; varying vec2 vD; varying vec4 vBrush; varying vec2 vU; varying vec4 vFrame; uniform float uDbgSoak, uSoakMark, uClipM, uSweep, uHeadMin, uHeadBreak;
+uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix, uOwnR; varying float vSoak; varying float vClip; varying vec2 vD; varying vec4 vBrush; varying vec2 vU; varying vec4 vFrame; uniform float uDbgSoak, uSoakMark, uClipM, uSweep, uHeadMin, uHeadBreak, uBand;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -2088,6 +2088,11 @@ void main(){
                                    : min(mineAt(gl_FragCoord.xy + vU*0.5*headW), mineAt(gl_FragCoord.xy + vU*headW));
       headK = max(headK, moving*(1.0 - smoothstep(0.25, 0.75, aheadIn)));
     }
+    // (THE STRETCHED STROKE, user: "what if the old part doesn't dissolve but just continuously becomes the new stroke — one
+    // large stroke, dry, one side following the live movement and the other dragged along": with uBand 0 the whole swept
+    // mark is the stroke itself, all of it fresh and dry; its back is dragged after the front (the trail closing over
+    // uTrailT) and the stroke soaks in once it has caught up. uBand 1: the wet, dissolving band behind a dry head.)
+    if(uBand < 0.5){ headK = 1.0; bandPos = 0.0; }
     dryK = (1.0 - vBrush.w)*headK;
   }
   float oldK = uSweep > 0.5 ? 1.0 - headK : smoothstep(0.0, 0.6, tf);   // (how much of the wet, dissolving part this is)
@@ -2304,7 +2309,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uHeadMin:{value:OPT.headMin !== undefined ? OPT.headMin : 0.2}, uHeadBreak:{value:OPT.headBreak !== undefined ? OPT.headBreak : 0.95}, uFreshDry:{value:OPT.freshDry !== undefined ? OPT.freshDry : 0.85}, uSweep:{value:1}, uSoakOnS:{value:1}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uBand:{value:OPT.band || 0}, uHeadMin:{value:OPT.headMin !== undefined ? OPT.headMin : 0.2}, uHeadBreak:{value:OPT.headBreak !== undefined ? OPT.headBreak : 0.95}, uFreshDry:{value:OPT.freshDry !== undefined ? OPT.freshDry : 0.85}, uSweep:{value:1}, uSoakOnS:{value:1}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
