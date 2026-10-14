@@ -1898,7 +1898,7 @@ const STROKE_VS = `
 precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
-uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap;
+uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap, uFreshW;
 varying vec2 vLum; varying float vSoak; varying float vClip;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
@@ -1924,10 +1924,13 @@ void main(){
   float mdry = clamp((texture(tLineV, (a.xy + arcOff(a.z, a.w, 0.5*(s0 + s1)))/uRes).r - 0.2)/0.8, 0.0, 1.0);   // (level 1 → 0 … level 5 → 1)
   { float md = uDryStroke*mdry;
     if(layer < 3.5){ wet *= max(1.0 - 0.7*md, 0.0); dry = max(dry, min((layer < 0.5 ? 0.30 : 0.45)*md, 0.9)); } }
+  vClip = layer < 3.5 ? 1.0 + layer : 0.0;   // (the model's own paint: wash, colour, shade, darks; 1 + its layer)
   // (and it never SOAKS IN all the way: its marks stay separate, wet on dry, even at rest — user: the turtle and the
   // cat fur "still too wet")
-  vClip = layer < 3.5 ? 1.0 + layer : 0.0;   // (the model's own paint: wash, colour, shade, darks; 1 + its layer)
   float soakS = min(texelFetch(tS5,tx,0).z, 1.0 - uDryCap*mdry*(layer < 3.5 ? 1.0 : 0.0)); vSoak = soakS;
+  // FRESH STROKES ARE A LITTLE THINNER (user: "the thickness slightly decrease as they move, to give the illusion that new
+  // strokes are painted"): a stroke starts at uFreshW of its width and grows to full width as it soaks in (lines keep theirs)
+  if(layer < 4.5 || layer > 5.5) hw *= mix(uFreshW, 1.0, texelFetch(tS5,tx,0).z);
   // SOAK, a basic rule of the movement for EVERY stroke — the sky's too (user: "for all strokes this rule should be a basic part
   // of the movement engine"): fresh paint is DRY — crisp, broken by the bristles — and soaks in once the view is still
   { wet *= mix(uSoakMin, 1.0, soakS); dry = max(dry, (layer < 0.5 || layer > 5.5 ? 0.35 : 0.5)*(1.0 - soakS)); }
@@ -2223,7 +2226,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.85}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -2293,8 +2296,7 @@ void stateMain(){
   bool lineQ = abs(q3.z - 1.25) < 0.01 || (abs(q3.x - 1.0) + abs(q3.y - 1.0) + abs(q3.z) < 0.01 && abs(q3.w - 2.0) < 0.01);
   bool lineP = abs(p3.z - 1.25) < 0.01 || (abs(p3.x - 1.0) + abs(p3.y - 1.0) + abs(p3.z) < 0.01 && abs(p3.w - 2.0) < 0.01);
   if(uLineSnap > 0.5 && (lineP || lineQ)){   // (both kinds of line: a formed rod (z 1.25) and a gap-filling line; also when it was one last frame)
-    if(on){ o0 = p0; o1 = vec4(0.0, p1.yzw); o2 = p2; o3 = p3; o4 = vec4(0.0, p4.xy, 1.0);
-      o5 = vec4(0.0, 0.0, uRestT < 0.08 ? soakQ*exp(-length(p0.xy - q0.xy)/uDryPx) : soakUp, 0.0); } else clearOut(); return; }   // (the same soak rule as every stroke)
+    if(on){ o0 = p0; o1 = vec4(0.0, p1.yzw); o2 = p2; o3 = p3; o4 = vec4(0.0, p4.xy, 1.0); } else clearOut(); return; }   // (a snapped line stays dry: soak 0)
   float rk = texelFetch(tRank, tx, 0).r; float h = hash(vec2(mod(rk, 320.0), floor(rk/320.0)));   // (the stroke's own random moment, from its place in the old shuffled order)
   bool moving = uRestT < 0.08 + 0.25*h;                  // (user: after the movement stops, everything is done within ~1 s)                   // (each stroke notices the hand has stopped at its own moment)
   float sizeG = p1.y + 2.0*p1.z;
