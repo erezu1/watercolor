@@ -491,7 +491,10 @@ canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); const f =
 // THE SAME DEFAULT PRECISIONS IN BOTH STAGES OF EVERY SHADER: a uniform declared in the vertex and the fragment shader
 // must agree, and the defaults differ (int: highp vs mediump; samplers by driver) — the Pixel 10's PowerVR driver rejected
 // one mismatch; stated once here for every shader, no driver can disagree
-{ const P = 'precision highp float;\nprecision highp int;\nprecision highp sampler2D;\nprecision highp samplerCube;\nprecision highp sampler3D;\nprecision highp sampler2DArray;\n';
+{ const P = 'precision highp float;\nprecision highp int;\nprecision highp sampler2D;\nprecision highp samplerCube;\nprecision highp sampler3D;\nprecision highp sampler2DArray;\n' +
+    // (the SKY's tilt: pinned to directions like the real sky — the camera's 30° field of view gives 1.87 screens per radian,
+    // i.e. 1.68 in sky units; tilting down moves it UP; anchored so the default views (pitch 0.38) are as before)
+    '#define SKY_TILT(p) (0.133 - 1.68*((p) - 0.38))\n';
   const strip = src => src.replace(/^\s*precision\s+\w+\s+\w+\s*;[^\n]*$/gm, '');   // (the shaders' own precision lines: superseded)
   THREE.ShaderMaterial.prototype.onBeforeCompile = function(sh){ sh.vertexShader = P + strip(sh.vertexShader); sh.fragmentShader = P + strip(sh.fragmentShader); }; }
 // FEWER THAN 6 OUTPUTS PER PASS (WebGL 2 promises 4; older Android GPUs stop there): a shader writing more is compiled
@@ -1291,7 +1294,7 @@ void main(){
     float layer = aInfo.x; bool keep = true;
     if(layer > 5.5){                                     // a sky stroke off the picture
       float P = 5.6548668, cx = -uYaw*0.9; float dx = aPos.x - cx; dx -= P*floor(dx/P + 0.5);
-      vec2 tcS = vec2(dx/(uAspect*0.9) + 0.5, (aPos.y - uPitch*0.35)/0.9 + 0.5)*2.0-1.0;
+      vec2 tcS = vec2(dx/(uAspect*0.9) + 0.5, (aPos.y - SKY_TILT(uPitch))/0.9 + 0.5)*2.0-1.0;
       keep = abs(tcS.x)<1.25 && abs(tcS.y)<1.25;
     } else if(layer < 4.5){                              // a surface stroke hidden, turned away or off screen (same test as PLAN_FS)
       vec2 ndc = vClip.xy/vClip.w; vec2 uv = ndc*0.5+0.5; float vz = vClip.w;
@@ -1453,7 +1456,7 @@ void main(){
     float P = 5.6548668, cx = -uYaw*0.9;   // (the sky turns WITH the view: as the camera orbits, the far sky moves the way the model's far side does — user)
     float dx = vPos.x - cx; dx -= P*floor(dx/P + 0.5);
     vec2 sp = vec2(cx+dx, vPos.y);
-    vec2 uvS = vec2(dx/(uAspect*0.9) + 0.5, (vPos.y - uPitch*0.35)/0.9 + 0.5);
+    vec2 uvS = vec2(dx/(uAspect*0.9) + 0.5, (vPos.y - SKY_TILT(uPitch))/0.9 + 0.5);
     tc = uvS*2.0-1.0;
     bool on = abs(tc.x)<1.25 && abs(tc.y)<1.25;
     vec2 e = vec2(12.0*uK)/uRes;
@@ -2301,7 +2304,7 @@ void main(){
   if(uCull > 0.5){
     float layer = vInfo.x; bool keep = true;
     if(layer > 5.5){ float P = 5.6548668, cx = -uYaw*0.9; float dx = vPos.x - cx; dx -= P*floor(dx/P + 0.5);
-      vec2 tcS = vec2(dx/(uAspect*0.9) + 0.5, (vPos.y - uPitch*0.35)/0.9 + 0.5)*2.0-1.0; keep = abs(tcS.x)<1.25 && abs(tcS.y)<1.25; }
+      vec2 tcS = vec2(dx/(uAspect*0.9) + 0.5, (vPos.y - SKY_TILT(uPitch))/0.9 + 0.5)*2.0-1.0; keep = abs(tcS.x)<1.25 && abs(tcS.y)<1.25; }
     else if(layer < 4.5){ vec2 ndc = vClip.xy/vClip.w; vec2 uv = ndc*0.5+0.5; float vz = vClip.w;
       if(!(abs(ndc.x) < 1.15 && abs(ndc.y) < 1.15 && vClip.w > 0.0)) keep = false;
       else { vec4 d = texture(tData, uv); float z0 = d.b*uDepthRange, gZS = clamp(z0/13.0, 0.7, 3.0);
@@ -2331,7 +2334,7 @@ void main(){
   vec4 prev = texelFetch(tP4, tx, 0); oG = texelFetch(tP0, tx, 0);
   if(idx >= uNT || (prev.x == 0.0 && prev.y == 0.0 && prev.z == 0.0)){ oA = prev; return; }
   float layer = texelFetch(tA4, tx, 0).x;
-  if(layer > 5.5){ vec2 o = vec2(uDYaw/uAspect*uRes.x, -uDPitch*0.35/0.9*uRes.y); oA = prev + vec4(o, 0.0, 0.0); oG.xy += o; return; }
+  if(layer > 5.5){ vec2 o = vec2(uDYaw/uAspect*uRes.x, uDPitch*1.866*uRes.y);   // (the sky's tilt: as SKY_TILT) oA = prev + vec4(o, 0.0, 0.0); oG.xy += o; return; }
   vec3 pos = texelFetch(tA0, tx, 0).xyz, nor = texelFetch(tA1, tx, 0).xyz;
   vec4 c = uProj*viewMatrix*vec4(pos, 1.0); vec2 ndc = c.xy/max(c.w, 1e-3), uv = ndc*0.5 + 0.5;
   float vis = prev.z;
