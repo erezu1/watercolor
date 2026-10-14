@@ -1950,7 +1950,7 @@ void main(){
   vClip = layer < 3.5 ? 1.0 + layer : 0.0;   // (the model's own paint: wash, colour, shade, darks; 1 + its layer)
   // (and it never SOAKS IN all the way: its marks stay separate, wet on dry, even at rest — user: the turtle and the
   // cat fur "still too wet")
-  float soakT = uSoakOnS > 0.5 ? texelFetch(tS5,tx,0).z : 1.0;   // (the stroke's soak; 'continuous' motion: always soaked)
+  float soakT = uSoakOnS > 0.5 ? (layer > 5.5 ? uLineGrow : texelFetch(tS5,tx,0).z) : 1.0;   // (the SKY pans ~0.9 screens per radian: by its own pixel speed even a slow drag dried it — it follows the picture's wetness, i.e. the drag speed, instead)   // (the stroke's soak; 'continuous' motion: always soaked)
   float soakS = min(soakT, 1.0 - uDryCap*mdry*(layer < 3.5 ? 1.0 : 0.0)); vSoak = soakS;
   // FRESH STROKES ARE A LITTLE THINNER (user: "the thickness slightly decrease as they move, to give the illusion that new
   // strokes are painted"): a stroke starts at uFreshW of its width and grows to full width as it soaks in (lines keep theirs)
