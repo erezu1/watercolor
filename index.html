@@ -462,6 +462,7 @@ let renderer;
 // WEBGL 2, asked for gently: first the fast GPU, then with no preference (a few drivers refuse 'high-performance'), then
 // accepting a slow one. Not found: the card says what the browser does offer, so the cause can be told apart
 let gl2 = null;
+if(new URLSearchParams(location.search).has('fallback')){ fail('shown on purpose: ?fallback'); return; }   // (to see the pre-painted fallback on any device)
 for(const a of [{ powerPreference:'high-performance' }, {}, { failIfMajorPerformanceCaveat:false, powerPreference:'low-power' }]){
   try{ gl2 = canvas.getContext('webgl2', Object.assign({ antialias:false, alpha:false, depth:true, stencil:false, premultipliedAlpha:true, preserveDrawingBuffer:false }, a)); }catch(e){ gl2 = null; }
   if(gl2) break; }
