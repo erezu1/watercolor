@@ -1896,7 +1896,7 @@ const STROKE_VS = `
 precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
-uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin;
+uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap;
 varying vec2 vLum; varying float vSoak;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
@@ -1919,9 +1919,12 @@ void main(){
   float s0 = max(b.x, 0.0), s1 = b.y, hw = b.z;
   // A DRY MATERIAL (tLine.r at the stroke's middle: rock, fur, a turtle's shell) is painted with a drier brush: crisper
   // edges that do not bleed, and bristle gaps — the wash too (user: the turtle and castle "still too wet")
-  { float md = uDryStroke*smoothstep(0.3, 0.6, texture(tLineV, (a.xy + arcOff(a.z, a.w, 0.5*(s0 + s1)))/uRes).r);
+  float mdry = smoothstep(0.3, 0.6, texture(tLineV, (a.xy + arcOff(a.z, a.w, 0.5*(s0 + s1)))/uRes).r);
+  { float md = uDryStroke*mdry;
     if(layer < 3.5){ wet *= max(1.0 - 0.7*md, 0.0); dry = max(dry, min((layer < 0.5 ? 0.30 : 0.45)*md, 0.9)); } }
-  float soakS = texelFetch(tS5,tx,0).z; vSoak = soakS;
+  // (and it never SOAKS IN all the way: its marks stay separate, wet on dry, even at rest — user: the turtle and the
+  // cat fur "still too wet")
+  float soakS = min(texelFetch(tS5,tx,0).z, 1.0 - uDryCap*mdry*(layer < 3.5 ? 1.0 : 0.0)); vSoak = soakS;
   if(layer < 5.5){ wet *= mix(uSoakMin, 1.0, soakS); dry = max(dry, (layer < 0.5 ? 0.35 : 0.5)*(1.0 - soakS)); }   // (SOAK: fresh paint is DRY — crisp, broken by the bristles — and soaks in once the view is still)
   if(dissolving){ wet = mix(uSoakMin + 0.2, 1.0, texelFetch(tS5,tx,0).z); dry = 0.0; }   // (a dissolving stroke: wet, its edge melting — once it has soaked in; while the view moves it fades dry)
   float e0 = s0 - hw*1.18, e1 = s1 + hw*1.18;              // the strip covers the path plus its round ends (and a margin)
@@ -2199,7 +2202,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uDbgSoak:{value:OPT.dbgSoak ? 1 : 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0.15}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak ? 1 : 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0.15}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
