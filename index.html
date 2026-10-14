@@ -1192,7 +1192,7 @@ const PLAN_FS = `
 precision highp float; precision highp sampler2D;
 uniform sampler2D tColor; uniform sampler2D tData; uniform sampler2D tShape; uniform sampler2D tLine; uniform sampler2D tRaw; uniform sampler2D tThinC; uniform sampler2D tThinD;
 uniform float uShadowOwn, uLineAll, uWhiteLines;
-uniform float uJit, uCutK, uHtK, uRoundK, uLineMax, uResvT, uSunK, uSunLo, uInkK, uCoverC, uBoardT; uniform float uDryHi, uMarksP;
+uniform float uJit, uCutK, uHtK, uRoundK, uLineMax, uResvT, uSunK, uSunLo, uInkK, uCoverC, uBoardT; uniform float uDryHi, uMarksP, uStubLo;
 uniform vec2 uRes; uniform float uGrowMax, uCoarseMin, uCoarseSz, uToneK, uCoarseK, uCover1, uCoverG; uniform float uK, uDepthRange, uLoose, uCamDist, uRefDist, uSizeK, uYaw, uPitch, uAspect, uDetail, uFocal, uFadeR;
 uniform vec2 uFadeC; uniform float uCables, uFadeY, uDbgP, uShadeK, uDbgR, uEarly;   // (uShadeK: how strongly light and shade are told apart)
 // PLANNED AGAINST THE PAPER (readability study): lines and darks are the last glaze; what the first three glazes have
@@ -1421,7 +1421,7 @@ void main(){
       hw *= mix(1.0, 0.80, smoothstep(2.5*uK, 5.0*uK, hw));   // (a thick beam: its measured radius is to its corners; a box is narrower than that)
       hl = 0.5*len + hw;
       tc = ((pa+pb)*0.5/uRes)*2.0-1.0;
-      amount = 0.9*uCables*smoothstep(1.2, 2.2, len/max(2.0*hw, 1e-3)); vis = 1.0;   // (a piece seen END-ON — shorter than it is wide — is no line: it was a round dark dab, user: black blots at the Hill Castle gate)
+      amount = 0.9*uCables*smoothstep(uStubLo, uStubLo + 1.5, len/max(2.0*hw, 1e-3)); vis = 1.0;   // (a piece seen END-ON — shorter than it is wide — is no line: it was a round dark dab, user: black blots at the Hill Castle gate; and a short stub, a few widths long, is a dark TICK — 'pencil' marks on the Floating Castle, user: remove them)
       if(uFadeR > 0.0 && vPos.y <= uFadeY) amount *= 1.0 - smoothstep(0.70, 1.0, length(vPos.xz - uFadeC)/uFadeR);   // (lines on the ground fade with it: no lone dashes)
       // a thin thing like what is behind it (a plank on its roof) needs no line: that colour is painted already. A lighter
       // one (a white frame on a blue wall) is RESERVED in the strokes behind it (STROKE_FS/WET_FS) and gets its own
@@ -2132,7 +2132,7 @@ const planMat = new THREE.ShaderMaterial({
   uniforms:{
     tColor:{value:null}, tData:{value:null}, tShape:{value:null}, tLine:{value:null}, tRaw:{value:null}, tThinC:{value:null}, tThinD:{value:null}, tG0p:{value:null}, tG1p:{value:null}, tG2p:{value:null}, uPaintRef:{value:1}, uSmallShape:{value:1},
     uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, uK:{value:1}, uDepthRange:SHARED.uDepthRange, uLoose:{value:0.4},
-    uQK:{value:1}, uDryHi:{value:OPT.dryHi !== undefined ? OPT.dryHi : 1}, uMarksP:{value:0}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uShadowOwn:{value:0}, uLineAll:{value:0}, uWhiteLines:{value:0}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
+    uQK:{value:1}, uDryHi:{value:OPT.dryHi !== undefined ? OPT.dryHi : 1}, uMarksP:{value:0}, uStubLo:{value:OPT.stubLo !== undefined ? OPT.stubLo : 2.5}, uJit:{value:1}, uCutK:{value:1}, uHtK:{value:1}, uRoundK:{value:0.5}, uLineMax:{value:14}, uResvT:{value:0.3}, uSunK:{value:1}, uSunLo:{value:0.04}, uInkK:{value:1}, uCoverC:{value:2.5}, uShadowOwn:{value:0}, uLineAll:{value:0}, uWhiteLines:{value:0}, uBoardT:{value:OPT.boardT !== undefined ? OPT.boardT : -1}, uCamDist:{value:20}, uRefDist:{value:20}, uGrowMax:{value:3}, uCoarseSz:{value:0.55}, uCoarseMin:{value:0}, uToneK:{value:1}, uCoarseK:{value:1}, uCover1:{value:9}, uCoverG:{value:9}, uSizeK:{value:1}, uYaw:{value:0}, uPitch:{value:0.36}, uAspect:{value:0.5}, uDetail:{value:0}, uFocal:{value:500}, uFadeR:{value:0}, uFadeC:{value:new THREE.Vector2()}, uCables:{value:1}, uFadeY:{value:0}, uDbgP:{value:0}, uShadeK:{value:1}, uDbgR:{value:0}, uCull:{value:1}, uEarly:{value:1}, uQN:{value:1e9},
     uSkyA:{value:new THREE.Vector3()}, uSkyB:{value:new THREE.Vector3()}, uSkyAll:{value:0},
     uShadow:{value:new THREE.Vector3()}, uWarm:{value:new THREE.Vector3()}, uWashA:{value:new THREE.Vector3()}, uWashB:{value:new THREE.Vector3()}, uSky:{value:new THREE.Vector3()}
   },
@@ -2562,7 +2562,7 @@ precision highp float;
 varying vec2 vUv;
 uniform sampler2D tG0; uniform sampler2D tG1; uniform sampler2D tG2; uniform sampler2D tG3;
 uniform sampler2D tW1; uniform sampler2D tW2; uniform sampler2D tWF; uniform sampler2D tShapeR; uniform sampler2D tDataR; uniform sampler2D tColorR;
-uniform vec2 uResI; uniform float uKi, uSolo, uWetOn, uDR, uDtR, uResetR, uGranK, uNzK, uResDead, uRestR, uWetT; uniform vec3 uShadowR; uniform sampler2D tEprev; uniform sampler2D tAprev;
+uniform vec2 uResI; uniform float uKi, uSolo, uWetOn, uDR, uDtR, uResetR, uGranK, uNzK, uResDead, uRestR, uWetT, uShWet; uniform vec3 uShadowR; uniform sampler2D tEprev; uniform sampler2D tAprev;
 layout(location=0) out highp vec4 oAbs;   // the painting (absorbance)
 layout(location=1) out highp vec4 oE;     // how far the blending has got (kept from frame to frame)
 ${FS_COMMON}
@@ -2603,10 +2603,10 @@ vec3 wetWash(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz, 
   return pig*c*(1.0 + gEdgeK*kEdge*edge);
 }
 // (speed) the dry (wetOn 0) and the wet version of one wash share their taps
-void wetWash2(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz, float kEdge, float rad, float wetOn, out vec3 dry, out vec3 wetR){
+void wetWash2(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz, float kEdge, float rad, float wetOn, float wLo, out vec3 dry, out vec3 wetR){
   vec4 g = texture2D(t, vUv), b = texture2D(tw, vUv);
   float wet = smoothstep(0.55, 0.9, wf)*wetOn;
-  float cH = smoothstep(lo, hi, g.a + nz), cS = smoothstep(0.03, 0.55, b.a + nz*0.5);
+  float cH = smoothstep(lo, hi, g.a + nz), cS = smoothstep(wLo, 0.55, b.a + nz*0.5);
   float c = mix(cH, cS, wet);
   dry = vec3(0.0); wetR = vec3(0.0);
   if(cH < 0.003 && c < 0.003) return;
@@ -2659,12 +2659,14 @@ void main(){
     rv = max(rv, max(max(resR(vUv + vec2(pr.x,0.0)), resR(vUv - vec2(pr.x,0.0))), max(resR(vUv + vec2(0.0,pr.y)), resR(vUv - vec2(0.0,pr.y)))));
     gEdgeK = 1.0 - rv; }
   vec3 A1d, A2d, A1w, A2w;
-  if(uResDead > 0.5){ wetWash2(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, uWetOn, A1d, A1w); wetWash2(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, uWetOn, A2d, A2w); }
+  // (the SHADE is not run wet (uShWet 0): the faint fringe its strokes leave past an object, carried along each pixel's tilted
+  // flow, came out as dark DASHES over the turtle's cloud sea — 'pencil' marks, user: remove them; wet, it changed ~0.2% else)
+  if(uResDead > 0.5){ wetWash2(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, uWetOn, 0.03, A1d, A1w); wetWash2(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, uWetOn*uShWet, 0.03, A2d, A2w); }
   else {
   A1d = wetWash(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, 0.0);
   A2d = wetWash(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, 0.0);   // (was ±22%: blocky mottling in shadows)
   A1w = wetWash(tG1, tW1, wf.r, 0.17, 0.35, nz, 0.35, 3.5, uWetOn);
-  A2w = wetWash(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, uWetOn); }
+  A2w = wetWash(tG2, tW2, wf.g, 0.18, 0.34, nz, 0.55, 3.5, uWetOn*uShWet); }
   A1d *= (0.97+0.06*gran); A2d *= (0.90+0.20*gran); A1w *= (0.97+0.06*gran); A2w *= (0.90+0.20*gran);
   // where paint has just been laid down (more paint than a moment ago) it is FRESH: it stays as painted and blends
   // over ~0.35 s; paint that was already there (a stroke just following its spot) stays blended
@@ -2891,7 +2893,7 @@ const wetMat = new THREE.ShaderMaterial({
 const wetScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), wetMat); q.frustumCulled=false; wetScene.add(q); }
 const resolveMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
-  uniforms:{ uWhiteL:{value:0}, uFillR:{value:OPT.fillR || 7}, uMarks:{value:0}, uMarkR:{value:9}, uFill:{value:OPT.fill !== undefined ? OPT.fill : 0.85}, tThinDR:{value:null}, tThinCR:{value:null}, tRawR:{value:null}, tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, uRestR:{value:10}, uWetT:{value:OPT.wetT !== undefined ? OPT.wetT : 0.6}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1}, uResDead:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
+  uniforms:{ uWhiteL:{value:0}, uFillR:{value:OPT.fillR || 7}, uMarks:{value:0}, uMarkR:{value:9}, uFill:{value:OPT.fill !== undefined ? OPT.fill : 0.85}, tThinDR:{value:null}, tThinCR:{value:null}, tRawR:{value:null}, tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, uShWet:{value:OPT.shWet !== undefined ? OPT.shWet : 0}, uRestR:{value:10}, uWetT:{value:OPT.wetT !== undefined ? OPT.wetT : 0.6}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1}, uResDead:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
   vertexShader:QUAD_VS, fragmentShader:RESOLVE_FS, depthTest:false, depthWrite:false
 });
 const finalMat = new THREE.ShaderMaterial({
