@@ -93,20 +93,22 @@ canvas:active{cursor:grabbing}
 .hw-brush g{mix-blend-mode:var(--brush-blend)}
 /* (a tiny landscape paints itself, as a sketch is begun: sky wash, far hill, sun blooming wet, near hill, tree dabs;
    then it dries away and begins again — one 5 s timeline) */
-.hl{fill:none;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:5s cubic-bezier(.45,.05,.35,1) infinite}
-.hl-sky{stroke:#a9c6df;stroke-width:20;animation-name:hlSky}
-.hl-far{stroke:#7f9cc0;stroke-width:10;animation-name:hlFar}
-.hl-near{stroke:#9db27a;stroke-width:17;animation-name:hlNear}
-.hl-t1,.hl-t2,.hl-t3{stroke:#5f7a55;stroke-width:8}
+.hl{fill:none;stroke-width:var(--w);stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:5s cubic-bezier(.45,.05,.35,1) infinite}
+/* (each stroke goes down DRY — a little narrow and strong — then soaks in over ~0.8 s: it spreads wider and lighter, as wet
+   paint bleeds into the paper; the same idea as the painting's own 'draw' motion) */
+.hl-sky{stroke:#a9c6df;--w:20px;animation-name:hlSky}
+.hl-far{stroke:#7f9cc0;--w:10px;animation-name:hlFar}
+.hl-near{stroke:#9db27a;--w:17px;animation-name:hlNear}
+.hl-t1,.hl-t2,.hl-t3{stroke:#5f7a55;--w:8px}
 .hl-t1{animation-name:hlT1}.hl-t2{animation-name:hlT2}.hl-t3{animation-name:hlT3}
-.hl-sun{fill:#e8b25e;transform-box:fill-box;transform-origin:center;animation:hlSun 5s ease-out infinite}
-@keyframes hlSky{0%{stroke-dashoffset:1;opacity:.42}16%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.36}96%,100%{stroke-dashoffset:0;opacity:0}}
-@keyframes hlFar{0%,12%{stroke-dashoffset:1;opacity:0}12.5%{stroke-dashoffset:.99;opacity:.55}28%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.48}96%,100%{stroke-dashoffset:0;opacity:0}}
-@keyframes hlSun{0%,26%{transform:scale(0);opacity:.0}29%{opacity:.6}40%{transform:scale(1);opacity:.6}84%{transform:scale(1.08);opacity:.5}96%,100%{transform:scale(1.08);opacity:0}}
-@keyframes hlNear{0%,34%{stroke-dashoffset:1;opacity:0}34.5%{stroke-dashoffset:.99;opacity:.62}50%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.55}96%,100%{stroke-dashoffset:0;opacity:0}}
-@keyframes hlT1{0%,52%{stroke-dashoffset:1;opacity:0}52.5%{stroke-dashoffset:.99;opacity:.75}57%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.65}96%,100%{stroke-dashoffset:0;opacity:0}}
-@keyframes hlT2{0%,56%{stroke-dashoffset:1;opacity:0}56.5%{stroke-dashoffset:.99;opacity:.75}61%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.65}96%,100%{stroke-dashoffset:0;opacity:0}}
-@keyframes hlT3{0%,60%{stroke-dashoffset:1;opacity:0}60.5%{stroke-dashoffset:.99;opacity:.75}65%{stroke-dashoffset:0}84%{stroke-dashoffset:0;opacity:.65}96%,100%{stroke-dashoffset:0;opacity:0}}
+.hint svg .hl-sun,.hl-sun{fill:#e8b25e;stroke:none;transform-box:fill-box;transform-origin:center;animation:hlSun 5s ease-out infinite}   /* (no outline: '.hint svg' strokes everything) */
+@keyframes hlSky{0%{stroke-dashoffset:1;opacity:.55;stroke-width:calc(var(--w)*.78)}16%{stroke-dashoffset:0;opacity:.55;stroke-width:calc(var(--w)*.78)}32%{opacity:.42;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.36;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
+@keyframes hlFar{0%,12%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.75)}12.5%{stroke-dashoffset:.99;opacity:.7;stroke-width:calc(var(--w)*.75)}28%{stroke-dashoffset:0;opacity:.7;stroke-width:calc(var(--w)*.75)}44%{opacity:.55;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.48;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
+@keyframes hlSun{0%,26%{transform:scale(0);opacity:.0}29%{opacity:.8}40%{transform:scale(.85);opacity:.8}56%{transform:scale(1);opacity:.6}84%{transform:scale(1.08);opacity:.5}96%,100%{transform:scale(1.08);opacity:0}}
+@keyframes hlNear{0%,34%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.78)}34.5%{stroke-dashoffset:.99;opacity:.78;stroke-width:calc(var(--w)*.78)}50%{stroke-dashoffset:0;opacity:.78;stroke-width:calc(var(--w)*.78)}66%{opacity:.62;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.55;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
+@keyframes hlT1{0%,52%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.7)}52.5%{stroke-dashoffset:.99;opacity:.9;stroke-width:calc(var(--w)*.7)}57%{stroke-dashoffset:0;opacity:.9;stroke-width:calc(var(--w)*.7)}70%{opacity:.75;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.65;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
+@keyframes hlT2{0%,56%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.7)}56.5%{stroke-dashoffset:.99;opacity:.9;stroke-width:calc(var(--w)*.7)}61%{stroke-dashoffset:0;opacity:.9;stroke-width:calc(var(--w)*.7)}74%{opacity:.75;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.65;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
+@keyframes hlT3{0%,60%{stroke-dashoffset:1;opacity:0;stroke-width:calc(var(--w)*.7)}60.5%{stroke-dashoffset:.99;opacity:.9;stroke-width:calc(var(--w)*.7)}65%{stroke-dashoffset:0;opacity:.9;stroke-width:calc(var(--w)*.7)}78%{opacity:.75;stroke-width:var(--w)}84%{stroke-dashoffset:0;opacity:.65;stroke-width:var(--w)}96%,100%{stroke-dashoffset:0;opacity:0;stroke-width:var(--w)}}
 .hint.welcome .hint-welcome{opacity:1}
 .hint.welcome .hint-anims,.hint.welcome .hint-text{opacity:0;transition:none}
 @keyframes hintSwipe{0%,100%{transform:translateX(-30px)}50%{transform:translateX(30px)}}
