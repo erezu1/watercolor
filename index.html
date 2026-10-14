@@ -405,7 +405,7 @@ window.MODEL_DATA["cats"] = { mesh:"H4sIAAAAAAACE3S7dVyTUf+AbQtid2FhNwoqiIqComKC
 /* ------------------------------------------------------------------ */
 const $ = id => document.getElementById(id);
 const sheet = $('sheet'), canvas = $('c');
-function fail(){ $('fail').style.display='grid'; canvas.style.display='none'; $('hint').style.display='none'; $('dock').hidden=true; $('picker').hidden=true; $('menuBtn').style.display='none'; $('pickBtn').style.display='none'; }
+function fail(why){ if(why) $('fail').innerHTML = 'This painting needs graphics features this device doesn’t offer.<br><small style="opacity:.7">'+why+'</small>'; $('fail').style.display='grid'; canvas.style.display='none'; $('hint').style.display='none'; $('dock').hidden=true; $('picker').hidden=true; $('menuBtn').style.display='none'; $('pickBtn').style.display='none'; }
 if(!window.THREE){ fail(); return; }
 const THREE = window.THREE;
 const OPT = window.__OPT = Object.assign({ quad:1, cull:1, early:1, sort:1, skipPlan:1, strokeEarly:1, wetEarly:1, resolveDead:1 }, (()=>{ try{ return JSON.parse(new URLSearchParams(location.search).get('opt') || '{}'); }catch(e){ return {}; } })());   // speed-ups (all exact: same picture); each can be switched off for A/B tests with ?opt={"quad":0,...}
@@ -421,6 +421,14 @@ try{
   renderer = new THREE.WebGLRenderer({canvas, antialias:false, alpha:false, powerPreference:'high-performance'});
 }catch(e){ fail(); return; }
 if(!renderer.capabilities.isWebGL2){ fail(); return; }
+// (what the painter needs beyond WebGL 2: rendering into float textures, 6 outputs at once, gzip in the browser — say which
+// one is missing instead of a blank page; a friend's phone showed only the paper)
+{ const gl = renderer.getContext(), miss = [];
+  if(!gl.getExtension('EXT_color_buffer_float')) miss.push('float render targets (EXT_color_buffer_float)');
+  const mdb = gl.getParameter(gl.MAX_DRAW_BUFFERS); if(mdb < 6) miss.push('6 draw buffers (has '+mdb+')');
+  if(typeof DecompressionStream === 'undefined') miss.push('DecompressionStream (browser too old)');
+  if(miss.length){ fail(miss.join(' · ') + ' — ' + (gl.getParameter(gl.RENDERER) || '')); return; } }
+window.addEventListener('error', e => { if(!window.__shownErr){ window.__shownErr = 1; fail('error: ' + (e.message || e)); } });
 renderer.setPixelRatio(1);
 const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
