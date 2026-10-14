@@ -2223,7 +2223,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0.15}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -2342,7 +2342,7 @@ void stateMain(){
   vec2 dA2 = q4.w > 0.5 ? p4.xy - q4.yz : vec2(0.0); if(length(dA2) > 3.0*size + 60.0*uK) dA2 = vec2(0.0);
   if(!follow && !letGo && !big && carried + length(dA2) < 0.8*size + 3.0*uK && (moving || uRestT < 0.08 + 0.30*h)){
     status = 3.0; o0 = vec4(q0.xy + dA2, q0.zw); o1 = vec4(-(carried + length(dA2)) - 1e-3, s1, hw, q1.w); o2 = q2; o3 = q3;
-    o4 = vec4(q4.x, p4.xy, 1.0); o5 = vec4(trail*exp(-uDt/0.06), soakQ, 0.0); return;
+    o4 = vec4(q4.x, p4.xy, 1.0); o5 = vec4(trail*exp(-uDt/0.06), length(dA2) > 0.3 ? 0.0 : soakQ, 0.0); return;
   }
   if(!follow && !letGo && !big) letGo = true;
   if(!follow && !letGo){                                  // its goal is gone (hidden, thinned out): a moment's wait
@@ -2381,8 +2381,8 @@ void stateMain(){
     float Dmax = 1.5*max(size, sizeG) + 14.0*uK;
     if(length(D) > Dmax) D *= Dmax/length(D);
     if(length(D) < 0.3) D = vec2(0.0);
-    // (the paint now lies where it was not a moment ago in proportion to how far it moved, against its width)
-    o5 = vec4(D, growing ? 0.0 : (moving ? soakQ*exp(-length(moved)/(2.0*max(hw, 1.0))) : soakUp), 0.0);
+    // (paint that moved at all is fresh: dry)
+    o5 = vec4(D, growing ? 0.0 : (moving ? (length(moved) > 0.3 ? 0.0 : soakQ) : soakUp), 0.0);   // (ANY move: absolutely dry — a big wash moved a fraction of its width stayed wet)
     float Ln = length(nB - nA);
     // colour, width, strength: while the hand moves only a clear change is followed (and then all the way);
     // when it rests, everything settles exactly to the goal
@@ -2574,7 +2574,7 @@ precision highp float;
 varying vec2 vUv;
 uniform sampler2D tG0; uniform sampler2D tG1; uniform sampler2D tG2; uniform sampler2D tG3;
 uniform sampler2D tW1; uniform sampler2D tW2; uniform sampler2D tWF; uniform sampler2D tShapeR; uniform sampler2D tDataR; uniform sampler2D tColorR;
-uniform vec2 uResI; uniform float uKi, uSolo, uWetOn, uDR, uDtR, uResetR, uGranK, uNzK, uResDead, uRestR, uWetT, uShWet; uniform vec3 uShadowR; uniform sampler2D tEprev; uniform sampler2D tAprev;
+uniform vec2 uResI; uniform float uKi, uSolo, uWetOn, uDR, uDtR, uResetR, uGranK, uNzK, uResDead, uRestR, uWetT, uShWet, uWetNow; uniform vec3 uShadowR; uniform sampler2D tEprev; uniform sampler2D tAprev;
 layout(location=0) out highp vec4 oAbs;   // the painting (absorbance)
 layout(location=1) out highp vec4 oE;     // how far the blending has got (kept from frame to frame)
 ${FS_COMMON}
@@ -2603,7 +2603,7 @@ vec3 wash(sampler2D t, float lo, float hi, float nz, float kEdge, float rad){
 // where it meets another object (or a cast shadow edge) it is the ordinary crisp, ragged, edge-darkened wash
 vec3 wetWash(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz, float kEdge, float rad, float wetOn){
   vec4 g = texture2D(t, vUv), b = texture2D(tw, vUv);
-  float wet = smoothstep(0.55, 0.9, wf)*wetOn;
+  float wet = smoothstep(0.55, 0.9, wf)*wetOn*uWetNow;   // (uWetNow: 0 while the view moves, back to 1 over ~2 s — fresh paint is dry)
   float cH = smoothstep(lo, hi, g.a + nz), cS = smoothstep(0.03, 0.55, b.a + nz*0.5);
   float c = mix(cH, cS, wet);
   if(c < 0.003) return vec3(0.0);
@@ -2617,7 +2617,7 @@ vec3 wetWash(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz, 
 // (speed) the dry (wetOn 0) and the wet version of one wash share their taps
 void wetWash2(sampler2D t, sampler2D tw, float wf, float lo, float hi, float nz, float kEdge, float rad, float wetOn, float wLo, out vec3 dry, out vec3 wetR){
   vec4 g = texture2D(t, vUv), b = texture2D(tw, vUv);
-  float wet = smoothstep(0.55, 0.9, wf)*wetOn;
+  float wet = smoothstep(0.55, 0.9, wf)*wetOn*uWetNow;   // (uWetNow: 0 while the view moves, back to 1 over ~2 s — fresh paint is dry)
   float cH = smoothstep(lo, hi, g.a + nz), cS = smoothstep(wLo, 0.55, b.a + nz*0.5);
   float c = mix(cH, cS, wet);
   dry = vec3(0.0); wetR = vec3(0.0);
@@ -2905,7 +2905,7 @@ const wetMat = new THREE.ShaderMaterial({
 const wetScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), wetMat); q.frustumCulled=false; wetScene.add(q); }
 const resolveMat = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
-  uniforms:{ uWhiteL:{value:0}, uFillR:{value:OPT.fillR || 7}, uMarks:{value:0}, uMarkR:{value:9}, uFill:{value:OPT.fill !== undefined ? OPT.fill : 0.85}, tThinDR:{value:null}, tThinCR:{value:null}, tRawR:{value:null}, tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, uShWet:{value:OPT.shWet !== undefined ? OPT.shWet : 0}, uRestR:{value:10}, uWetT:{value:OPT.wetT !== undefined ? OPT.wetT : 0.6}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1}, uResDead:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
+  uniforms:{ uWhiteL:{value:0}, uFillR:{value:OPT.fillR || 7}, uMarks:{value:0}, uMarkR:{value:9}, uFill:{value:OPT.fill !== undefined ? OPT.fill : 0.85}, tThinDR:{value:null}, tThinCR:{value:null}, tRawR:{value:null}, tEprev:{value:null}, tAprev:{value:null}, uDtR:{value:1/60}, uResetR:{value:1}, uShWet:{value:OPT.shWet !== undefined ? OPT.shWet : 0}, uWetNow:{value:1}, uRestR:{value:10}, uWetT:{value:OPT.wetT !== undefined ? OPT.wetT : 0.6}, tG0:{value:null}, tG1:{value:null}, tG2:{value:null}, tG3:{value:null}, tW1:{value:null}, tW2:{value:null}, tWF:{value:null}, tShapeR:{value:null}, tDataR:{value:null}, tColorR:{value:null}, uShadowR:{value:new THREE.Vector3()}, uDR:SHARED.uDepthRange, uWetOn:{value:1}, uResI:{value:new THREE.Vector2(1,1)}, uKi:{value:1}, uSolo:{value:-1}, uGranK:{value:0}, uNzK:{value:1}, uResDead:{value:1} },   // (uGranK 0: no granulation — the user found any mottling 'granular')
   vertexShader:QUAD_VS, fragmentShader:RESOLVE_FS, depthTest:false, depthWrite:false
 });
 const finalMat = new THREE.ShaderMaterial({
@@ -4016,7 +4016,7 @@ function render(dt){
   renderer.setRenderTarget(rtWet[1]); renderer.render(wetScene, postCam);
   if(__sync) __sync('wet1');
   const Rz = resolveMat.uniforms; resCur = 1-resCur;
-  Rz.tEprev.value = rtRes[1-resCur].texture[1]; Rz.tAprev.value = rtRes[1-resCur].texture[0]; Rz.uDtR.value = dt; Rz.uResetR.value = wasReset ? 1 : 0; Rz.uRestR.value = restT;
+  Rz.tEprev.value = rtRes[1-resCur].texture[1]; Rz.tAprev.value = rtRes[1-resCur].texture[0]; Rz.uDtR.value = dt; Rz.uResetR.value = wasReset ? 1 : 0; Rz.uRestR.value = restT; Rz.uWetNow.value = restT < 0.05 ? 0 : 1 - Math.exp(-restT/(OPT.soakT !== undefined ? OPT.soakT : 0.6));
   renderer.setRenderTarget(rtRes[resCur]); renderer.render(resolveScene, postCam);
   finalMat.uniforms.tAbs.value = rtRes[resCur].texture[0];
   if(__sync) __sync('resolve');
@@ -4099,7 +4099,10 @@ fit(); setMood(0,false);
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>{ canvas.classList.remove('faded'); setTimeout(arrived, reduceMotion ? 0 : 650); }, 80); }
 window.__pavilion = { soakRead:()=>{ const gl = renderer.getContext(), N = STATE_S*STATE_S, st = rtState[stateRead], b5 = new Float32Array(N*4), b1 = new Float32Array(N*4);   // (test: the strokes' soak, 0 dry … 1)
     renderer.setRenderTarget(st); gl.readBuffer(gl.COLOR_ATTACHMENT0 + 5); gl.readPixels(0, 0, STATE_S, STATE_S, gl.RGBA, gl.FLOAT, b5); gl.readBuffer(gl.COLOR_ATTACHMENT0 + 1); gl.readPixels(0, 0, STATE_S, STATE_S, gl.RGBA, gl.FLOAT, b1); gl.readBuffer(gl.COLOR_ATTACHMENT0); renderer.setRenderTarget(null);
-    let n = 0, m = 0, lo = 0; for(let i=0;i<N;i++){ if(b1[i*4+3] < 0.5) continue; n++; m += b5[i*4+2]; if(b5[i*4+2] < 0.3) lo++; } return { n, mean:+(m/Math.max(n,1)).toFixed(3), dry:+(lo/Math.max(n,1)).toFixed(3), restT:+restT.toFixed(2) }; },
+    const info = strokeMeshes[current].attrTex[4].image.data, H = [0,0,0,0,0], byL = {};
+    let n = 0, m = 0, lo = 0; for(let i=0;i<N;i++){ if(b1[i*4+3] < 0.5) continue; n++; const k = b5[i*4+2]; m += k; if(k < 0.3) lo++; H[k < 0.01 ? 0 : k < 0.1 ? 1 : k < 0.3 ? 2 : k < 0.7 ? 3 : 4]++;
+      const L = Math.round(info[i*4]), e = byL[L] || (byL[L] = [0,0]); e[0]++; if(k >= 0.01) e[1]++; }
+    return { n, mean:+(m/Math.max(n,1)).toFixed(3), dry:+(lo/Math.max(n,1)).toFixed(3), hist:H, notDryByLayer:byL, restT:+restT.toFixed(2) }; },
   rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }, tone:(t,d)=>{ planMat.uniforms.uToneK.value=t; strokeMat.uniforms.uDomK.value=d; resetStrokes=true; dirty=true; }, coarseSz:(v)=>{ planMat.uniforms.uCoarseSz.value=v; resetStrokes=true; dirty=true; }, cover:(a,g)=>{ planMat.uniforms.uCover1.value=a; planMat.uniforms.uCoverG.value=g; resetStrokes=true; dirty=true; }, coarse:(v)=>{ planMat.uniforms.uCoarseK.value=v; wetMat.uniforms.uPaintStop.value=v > 0 ? 1 : 0; resetStrokes=true; dirty=true; }, growMax:(v)=>{ planMat.uniforms.uGrowMax.value=v; resetStrokes=true; dirty=true; }, analyze:()=>{   // (test: what this view paints with — strokes alive per glaze and their size on the
     // paper, and the reference: how much of the picture is the model, how many shapes, how much colour varies inside them)
     const gl = renderer.getContext(), rd = (rt, att, w, h) => { const b = new Float32Array(w*h*4); renderer.setRenderTarget(rt);
