@@ -426,10 +426,21 @@ if(OPT.fence === undefined) OPT.fence = PHONE ? 2 : 0;   // (n: at most n frames
 if(OPT.settleEvery === undefined) OPT.settleEvery = PHONE ? 2 : 1;   // (while strokes settle, the plan follows the paint every n-th frame)   // (while the view moves, the full plan every other frame; the anchors every frame)
 
 let renderer;
+// WEBGL 2, asked for gently: first the fast GPU, then with no preference (a few drivers refuse 'high-performance'), then
+// accepting a slow one. Not found: the card says what the browser does offer, so the cause can be told apart
+let gl2 = null;
+for(const a of [{ powerPreference:'high-performance' }, {}, { failIfMajorPerformanceCaveat:false, powerPreference:'low-power' }]){
+  try{ gl2 = canvas.getContext('webgl2', Object.assign({ antialias:false, alpha:false, depth:true, stencil:false, premultipliedAlpha:true, preserveDrawingBuffer:false }, a)); }catch(e){ gl2 = null; }
+  if(gl2) break; }
+if(!gl2){ let why = 'WebGL 2 is not available in this browser';
+  try{ const g1 = document.createElement('canvas').getContext('webgl'); if(g1){ const di = g1.getExtension('WEBGL_debug_renderer_info');
+      why += ' (only WebGL 1: ' + (di ? g1.getParameter(di.UNMASKED_RENDERER_WEBGL) : g1.getParameter(g1.RENDERER)) + ')'; }
+    else why += ' — WebGL is switched off: try restarting the browser (Chrome turns it off for a site after graphics crashes), or turn on hardware acceleration'; }catch(e){}
+  fail(why); return; }
 try{
-  renderer = new THREE.WebGLRenderer({canvas, antialias:false, alpha:false, powerPreference:'high-performance'});
-}catch(e){ fail(); return; }
-if(!renderer.capabilities.isWebGL2){ fail(); return; }
+  renderer = new THREE.WebGLRenderer({canvas, context:gl2, antialias:false, alpha:false});
+}catch(e){ fail('the graphics context could not start: ' + (e && e.message || e)); return; }
+if(!renderer.capabilities.isWebGL2){ fail('WebGL 2 is not available in this browser'); return; }
 // (what the painter needs beyond WebGL 2: rendering into float textures, 6 outputs at once, gzip in the browser — say which
 // one is missing instead of a blank page; a friend's phone showed only the paper)
 { const gl = renderer.getContext(), miss = [];
