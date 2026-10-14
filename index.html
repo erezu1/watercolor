@@ -1897,10 +1897,10 @@ precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
 uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap;
-varying vec2 vLum; varying float vSoak;
+varying vec2 vLum; varying float vSoak; varying float vClip;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
-#define CULL { gl_Position = vec4(2.0,2.0,2.0,1.0); vQ=vec2(0.0); vCol=vec4(0.0); vP=vec3(0.0,0.0,2.0); vSeed=0.0; vWob=0.0; vRamp=vec4(1.0,0.0,0.0,0.0); vTr=vec2(0.0); vDis=0.0; vThin=0.0; vShp=vec3(0.0); vRes=0.0; vLum=vec2(0.0); vSoak=1.0; return; }
+#define CULL { gl_Position = vec4(2.0,2.0,2.0,1.0); vQ=vec2(0.0); vCol=vec4(0.0); vP=vec3(0.0,0.0,2.0); vSeed=0.0; vWob=0.0; vRamp=vec4(1.0,0.0,0.0,0.0); vTr=vec2(0.0); vDis=0.0; vThin=0.0; vShp=vec3(0.0); vRes=0.0; vLum=vec2(0.0); vSoak=1.0; vClip=0.0; return; }
 void main(){
   ivec2 tx = ivec2(int(mod(aIdx,uS)), int(floor(aIdx/uS)));
   vec4 a = texelFetch(tS0,tx,0), b = texelFetch(tS1,tx,0), c = texelFetch(tS2,tx,0);
@@ -1924,6 +1924,7 @@ void main(){
     if(layer < 3.5){ wet *= max(1.0 - 0.7*md, 0.0); dry = max(dry, min((layer < 0.5 ? 0.30 : 0.45)*md, 0.9)); } }
   // (and it never SOAKS IN all the way: its marks stay separate, wet on dry, even at rest — user: the turtle and the
   // cat fur "still too wet")
+  vClip = layer < 3.5 ? 1.0 + layer : 0.0;   // (the model's own paint: wash, colour, shade, darks; 1 + its layer)
   float soakS = min(texelFetch(tS5,tx,0).z, 1.0 - uDryCap*mdry*(layer < 3.5 ? 1.0 : 0.0)); vSoak = soakS;
   if(layer < 5.5){ wet *= mix(uSoakMin, 1.0, soakS); dry = max(dry, (layer < 0.5 ? 0.35 : 0.5)*(1.0 - soakS)); }   // (SOAK: fresh paint is DRY — crisp, broken by the bristles — and soaks in once the view is still)
   if(dissolving){ wet = mix(uSoakMin + 0.2, 1.0, texelFetch(tS5,tx,0).z); dry = 0.0; }   // (a dissolving stroke: wet, its edge melting — once it has soaked in; while the view moves it fades dry)
@@ -1968,7 +1969,7 @@ const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix; varying float vSoak; uniform float uDbgSoak, uSoakMark;
+uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix; varying float vSoak; varying float vClip; uniform float uDbgSoak, uSoakMark, uClipM;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -2011,6 +2012,12 @@ void main(){
   float wob = (uEarlyS > 0.5 && r0 + wobMax <= 1.0 - soft) ? 0.0 : ((vn(q*2.3+vSeed)-0.5)*0.30 + (vn(q*6.0+vSeed*1.7)-0.5)*0.10)*vWob;
   float r = r0 + wob;
   float a = 1.0 - smoothstep(1.0-soft, 1.0, r);
+  // NO PAINT OFF THE MODEL (user: "why the dark cat has a halo?"): the wet wash's soft edge ran past the outline onto the
+  // paper — a grey halo round the black cat. The model's paint stops at its silhouette
+  // (softened over ~1.5 px; its ragged edge stays inside). The sky has its own strokes.
+  if(vClip > 0.5 && uClipM > 0.0){ vec2 cp = 1.5/uRes; float cov = 0.25*(texture2D(tDataS, gl_FragCoord.xy/uRes + vec2(cp.x, cp.y)).a + texture2D(tDataS, gl_FragCoord.xy/uRes - vec2(cp.x, cp.y)).a
+      + texture2D(tDataS, gl_FragCoord.xy/uRes + vec2(cp.x, -cp.y)).a + texture2D(tDataS, gl_FragCoord.xy/uRes + vec2(-cp.x, cp.y)).a);
+    a *= mix(1.0, smoothstep(0.0, 0.75, cov), uClipM); }
   if(uEarlyS > 0.5 && a <= 0.0){ gl_FragColor = vec4(0.0); return; }
   if(vRes > 0.5) a *= 1.0 - uResvOn*reserveAt(gl_FragCoord.xy/uRes);   // (also on a moved stroke's trail: it swept over the white frames while dragging)
   if(vLum.y > 0.5){                                      // LIGHTS ARE RESERVED: a stroke paints around another object that is clearly lighter
@@ -2093,6 +2100,7 @@ void main(){
     }
     gl_FragColor = vec4(colS*vCol.a*a*k*pig*(wS + rimS), wS*a*(vRamp.z > 1.5 ? 1.0 : 0.25 + 0.75*min(k, 1.0)));
     if(uDbgSoak > 0.5) gl_FragColor.rgb = mix(vec3(0.1, 1.3, 1.3), vec3(1.3, 0.7, 0.1), vSoak)*gl_FragColor.a*0.7;   // (debug: dry red … soaked blue)
+    if(uDbgSoak > 1.5) gl_FragColor.rgb = (vShp.z > 1.5 ? vec3(3.0) : vShp.z > 0.5 ? vec3(0.0, 2.5, 2.5) : vec3(2.5, 2.5, 0.0))*gl_FragColor.a;   // (debug 2: shadow passage black, cut-in red, uncut blue)
     return;
     gl_FragColor = vec4(vCol.rgb*vCol.a*a*k*pig, a*(vRamp.z > 1.5 ? 1.0 : 0.25 + 0.75*min(k, 1.0)));   // (z 2, a narrow form: water all across, so pigment strength follows k)
   } else {
@@ -2105,6 +2113,7 @@ void main(){
     float rim = vRamp.w < 1.5 ? uRimK*crsF*smoothstep(0.62, 0.95, r0) : 0.0;
     gl_FragColor = vec4(vCol.rgb*vCol.a*a*pig*(wgt + rim*(1.0 + uDomK*0.05)), a*wgt);
     if(uDbgSoak > 0.5) gl_FragColor.rgb = mix(vec3(0.1, 1.3, 1.3), vec3(1.3, 0.7, 0.1), vSoak)*gl_FragColor.a*0.7;   // (debug: dry red … soaked blue)
+    if(uDbgSoak > 1.5) gl_FragColor.rgb = (vShp.z > 1.5 ? vec3(3.0) : vShp.z > 0.5 ? vec3(0.0, 2.5, 2.5) : vec3(2.5, 2.5, 0.0))*gl_FragColor.a;   // (debug 2: shadow passage black, cut-in red, uncut blue)
   }
 }`;
 
@@ -2202,7 +2211,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak ? 1 : 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0.15}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0.15}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
