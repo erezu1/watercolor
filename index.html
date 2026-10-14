@@ -433,10 +433,22 @@ if(!renderer.capabilities.isWebGL2){ fail(); return; }
 // (what the painter needs beyond WebGL 2: rendering into float textures, 6 outputs at once, gzip in the browser — say which
 // one is missing instead of a blank page; a friend's phone showed only the paper)
 { const gl = renderer.getContext(), miss = [];
-  if(!gl.getExtension('EXT_color_buffer_float')) miss.push('float render targets (EXT_color_buffer_float)');
+  const f32 = !!gl.getExtension('EXT_color_buffer_float'), f16 = f32 || !!gl.getExtension('EXT_color_buffer_half_float');
+  window.__F32 = f32 && !OPT.half;   // (no 32-bit float rendering: the stroke memory falls back to half floats — ~0.5 px steps, still paints)
+  if(!f16) miss.push('float render targets (EXT_color_buffer_float / half_float)');
   const mdb = gl.getParameter(gl.MAX_DRAW_BUFFERS); if(mdb < 4) miss.push('4 draw buffers (has '+mdb+')');
-  if(typeof DecompressionStream === 'undefined') miss.push('DecompressionStream (browser too old)');
   if(miss.length){ fail(miss.join(' · ') + ' — ' + (gl.getParameter(gl.RENDERER) || '')); return; } }
+// THE GPU CONTEXT LOST (a low-memory phone reclaims it, or the app was in the background): no dead canvas — a card that
+// reloads the page on a tap
+canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); const f = $('fail');
+  f.innerHTML = 'The phone needed its graphics memory back.<br><small style="opacity:.7">Tap to paint again</small>'; f.style.display = 'grid'; f.style.cursor = 'pointer';
+  f.onclick = () => location.reload(); canvas.style.display = 'none'; }, false);
+// THE SAME DEFAULT PRECISIONS IN BOTH STAGES OF EVERY SHADER: a uniform declared in the vertex and the fragment shader
+// must agree, and the defaults differ (int: highp vs mediump; samplers by driver) — the Pixel 10's PowerVR driver rejected
+// one mismatch; stated once here for every shader, no driver can disagree
+{ const P = 'precision highp float;\nprecision highp int;\nprecision highp sampler2D;\nprecision highp samplerCube;\nprecision highp sampler3D;\nprecision highp sampler2DArray;\n';
+  const strip = src => src.replace(/^\s*precision\s+\w+\s+\w+\s*;[^\n]*$/gm, '');   // (the shaders' own precision lines: superseded)
+  THREE.ShaderMaterial.prototype.onBeforeCompile = function(sh){ sh.vertexShader = P + strip(sh.vertexShader); sh.fragmentShader = P + strip(sh.fragmentShader); }; }
 // FEWER THAN 6 OUTPUTS PER PASS (WebGL 2 promises 4; older Android GPUs stop there): a shader writing more is compiled
 // twice — part A writes outputs 0–3, part B the rest — into two targets that look like one to the rest of the code
 // (rt.texture lists both). Only on such devices: the others run exactly as before. (OPT.split forces it, for testing.)
@@ -2286,7 +2298,7 @@ void main(){
   oA = vec4(uv*uRes, vis, prev.w);
   vec2 off = uv*uRes - prev.xy; if(length(off) < 400.0) oG.xy += off;
 }`;
-const rtAnch = new THREE.WebGLMultipleRenderTargets(STATE_S, STATE_S, 2, { type:THREE.FloatType, format:THREE.RGBAFormat, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false, generateMipmaps:false });
+const rtAnch = new THREE.WebGLMultipleRenderTargets(STATE_S, STATE_S, 2, { type:window.__F32 ? THREE.FloatType : THREE.HalfFloatType, format:THREE.RGBAFormat, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false, generateMipmaps:false });
 const anchMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3,
   uniforms:{ tA0:{value:null}, tA1:{value:null}, tA4:{value:null}, tP4:{value:null}, tP0:{value:null}, tData:{value:null}, tShape:{value:null}, uProj:{value:new THREE.Matrix4()},
              uNT:{value:0}, uS:{value:STATE_S}, uDepthRange:SHARED.uDepthRange, uDYaw:{value:0}, uDPitch:{value:0}, uAspect:{value:1}, uRes:{value:new THREE.Vector2(1,1)} },
@@ -2312,7 +2324,7 @@ tagShapes(group);
 strokeMeshes.pavilion = makeStrokeMesh(group);
 
 // the planned strokes: three float textures, one texel per stroke
-const stOpts = { type:THREE.FloatType, format:THREE.RGBAFormat, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false, generateMipmaps:false };
+const stOpts = { type:window.__F32 ? THREE.FloatType : THREE.HalfFloatType, format:THREE.RGBAFormat, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false, generateMipmaps:false };
 const rtPlan = mrt(STATE_S,STATE_S,5,stOpts);
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -3018,8 +3030,34 @@ const atlasTexture = src => { const t = new THREE.Texture(src); t.colorSpace = T
   t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy()); t.needsUpdate = true; return t; };
 function b64bytes(b64){ const bin=atob(b64); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; }
 // the mesh format written by tools/convert_tokyo.py and tools/convert_gltf.mjs (see there)
+// A SMALL INFLATE (RFC 1951) for browsers without DecompressionStream (Chrome < 80, iOS Safari < 16.4)
+function gunzip(u8){
+  let p = 10; const fl = u8[3]; if(fl & 4){ p += 2 + (u8[p] | u8[p+1] << 8); } if(fl & 8){ while(u8[p++]); } if(fl & 16){ while(u8[p++]); } if(fl & 2) p += 2;
+  let out = new Uint8Array(u8.length*4), op = 0, bb = 0, bc = 0;
+  const need = n => { if(op + n > out.length){ const o2 = new Uint8Array(Math.max(out.length*2, op + n)); o2.set(out); out = o2; } };
+  const bits = n => { while(bc < n){ bb |= u8[p++] << bc; bc += 8; } const v = bb & ((1 << n) - 1); bb >>>= n; bc -= n; return v; };
+  const build = lens => { const cnt = new Uint16Array(16), offs = new Uint16Array(16), sym = new Uint16Array(lens.length);
+    for(const l of lens) cnt[l]++; cnt[0] = 0; for(let i=1;i<16;i++) offs[i] = offs[i-1] + cnt[i-1];
+    for(let i=0;i<lens.length;i++) if(lens[i]) sym[offs[lens[i]]++] = i; return { cnt, sym }; };
+  const decode = h => { let code = 0, first = 0, idx = 0; for(let l=1;l<16;l++){ code |= bits(1); const c = h.cnt[l]; if(code - c < first) return h.sym[idx + code - first]; idx += c; first += c; first <<= 1; code <<= 1; } return -1; };
+  const LB = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258], LE = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
+  const DB = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577], DE = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+  let fixL, fixD; { const l = new Uint8Array(288); l.fill(8, 0, 144); l.fill(9, 144, 256); l.fill(7, 256, 280); l.fill(8, 280, 288); fixL = build(l); fixD = build(new Uint8Array(30).fill(5)); }
+  for(let last = 0; !last;){ last = bits(1); const type = bits(2);
+    if(type === 0){ bb = 0; bc = 0; const len = u8[p] | u8[p+1] << 8; p += 4; need(len); out.set(u8.subarray(p, p + len), op); op += len; p += len; continue; }
+    let lh = fixL, dh = fixD;
+    if(type === 2){ const hl = bits(5) + 257, hd = bits(5) + 1, hc = bits(4) + 4, ord = [16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15], cl = new Uint8Array(19);
+      for(let i=0;i<hc;i++) cl[ord[i]] = bits(3); const ch = build(cl), ls = new Uint8Array(hl + hd);
+      for(let i=0;i<hl + hd;){ const sy = decode(ch); if(sy < 16) ls[i++] = sy; else if(sy === 16){ const pv = ls[i-1]; for(let r = 3 + bits(2); r--;) ls[i++] = pv; } else if(sy === 17){ i += 3 + bits(3); } else { i += 11 + bits(7); } }
+      lh = build(ls.subarray(0, hl)); dh = build(ls.subarray(hl)); }
+    for(;;){ const sy = decode(lh); if(sy < 256){ need(1); out[op++] = sy; continue; } if(sy === 256) break;
+      const li = sy - 257, len = LB[li] + bits(LE[li]), di = decode(dh), dist = DB[di] + bits(DE[di]); need(len);
+      for(let k=0;k<len;k++, op++) out[op] = out[op - dist]; }
+  }
+  return out.subarray(0, op).slice();
+}
 async function decodeMesh(b64){
-  const buf = await new Response(new Blob([b64bytes(b64)]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  const buf = typeof DecompressionStream !== 'undefined' ? await new Response(new Blob([b64bytes(b64)]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer() : gunzip(b64bytes(b64)).buffer;   // (older browsers: our own inflate)
   const dv = new DataView(buf);
   const nV = dv.getUint32(0,true), nF = dv.getUint32(4,true);
   const pmin=[8,12,16].map(o=>dv.getFloat32(o,true)), ext=[20,24,28].map(o=>dv.getFloat32(o,true));
@@ -3799,7 +3837,7 @@ const PAINTINGS = [
     credit:'“Medieval castle with village” by <a href="https://sketchfab.com/3d-models/medieval-castle-with-village-5109b5e46e064790badecedf8f6d2ef6" target="_blank" rel="noopener">Artbake Graphics</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (the castle and its hill only: the village, forests and rock spires left out; its grey walls recolored) and used as the painter’s reference.' },
   { id:'castle', title:'The Floating Castle', desc:'A castle on the back of a flying turtle', aria:'A castle on the back of a flying turtle, painted in watercolor', heavy:true, data:'floating_castle',
     credit:'“Floating Castle” by <a href="https://sketchfab.com/3d-models/floating-castle-1e157bab3a4042eb834ca07d73aa28ce" target="_blank" rel="noopener">Shahriar Shahrabi</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (simplified, colors read from its texture; the clouds made plain white; sky, birds, the flying machine, effects and outlines removed) and used as the painter’s reference.' },
-].filter(p => !p.hidden && (p.id === 'pavilion' || typeof DecompressionStream !== 'undefined') && (!p.data || (window.MODEL_DATA && window.MODEL_DATA[p.data])));
+].filter(p => !p.hidden && (!p.data || (window.MODEL_DATA && window.MODEL_DATA[p.data])));
 const thumb = id => (window.THUMBS && window.THUMBS[id]) || '';
 const paintingsEl = $('paintings'), picker = $('picker'), pickBtn = $('pickBtn');
 PAINTINGS.forEach(p=>{
@@ -4193,7 +4231,12 @@ fit(); setMood(0,false);
   setScene('pavilion');
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   if(first !== 'pavilion') goTo(first); else setTimeout(()=>{ canvas.classList.remove('faded'); setTimeout(arrived, reduceMotion ? 0 : 650); }, 80); }
-window.__pavilion = { soakRead:()=>{ const gl = renderer.getContext(), N = STATE_S*STATE_S, st = rtState[stateRead], b5 = new Float32Array(N*4), b1 = new Float32Array(N*4);   // (test: the strokes' soak, 0 dry … 1)
+window.__pavilion = { progInfo:()=>{ const gl = renderer.getContext(), out = [];   // (test: texture units each shader program uses)
+    for(const p of renderer.info.programs || []){ const pr = p.program, n = gl.getProgramParameter(pr, gl.ACTIVE_UNIFORMS); let smp = 0;
+      for(let i=0;i<n;i++){ const u = gl.getActiveUniform(pr, i); if([gl.SAMPLER_2D, gl.SAMPLER_3D, gl.SAMPLER_CUBE, gl.SAMPLER_2D_ARRAY, gl.SAMPLER_2D_SHADOW].includes(u.type)) smp += u.size; }
+      out.push([p.name || p.cacheKey.slice(0, 30), smp]); }
+    return { maxFrag: gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS), maxVert: gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS), maxComb: gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS), progs: out.sort((a,b)=>b[1]-a[1]).slice(0, 8) }; },
+  soakRead:()=>{ const gl = renderer.getContext(), N = STATE_S*STATE_S, st = rtState[stateRead], b5 = new Float32Array(N*4), b1 = new Float32Array(N*4);   // (test: the strokes' soak, 0 dry … 1)
     renderer.setRenderTarget(st); gl.readBuffer(gl.COLOR_ATTACHMENT0 + 5); gl.readPixels(0, 0, STATE_S, STATE_S, gl.RGBA, gl.FLOAT, b5); gl.readBuffer(gl.COLOR_ATTACHMENT0 + 1); gl.readPixels(0, 0, STATE_S, STATE_S, gl.RGBA, gl.FLOAT, b1); gl.readBuffer(gl.COLOR_ATTACHMENT0); renderer.setRenderTarget(null);
     const info = strokeMeshes[current].attrTex[4].image.data, H = [0,0,0,0,0], byL = {};
     let n = 0, m = 0, lo = 0; for(let i=0;i<N;i++){ if(b1[i*4+3] < 0.5) continue; n++; const k = b5[i*4+2]; m += k; if(k < 0.3) lo++; H[k < 0.01 ? 0 : k < 0.1 ? 1 : k < 0.3 ? 2 : k < 0.7 ? 3 : 4]++;
