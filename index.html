@@ -1922,10 +1922,10 @@ precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
 uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap, uFreshW, uSoakOnS, uFreshWL, uLineGrow;
-varying vec2 vLum; varying float vSoak; varying float vClip;
+varying vec2 vLum; varying float vSoak; varying float vClip; varying vec2 vD;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
-#define CULL { gl_Position = vec4(2.0,2.0,2.0,1.0); vQ=vec2(0.0); vCol=vec4(0.0); vP=vec3(0.0,0.0,2.0); vSeed=0.0; vWob=0.0; vRamp=vec4(1.0,0.0,0.0,0.0); vTr=vec2(0.0); vDis=0.0; vThin=0.0; vShp=vec3(0.0); vRes=0.0; vLum=vec2(0.0); vSoak=1.0; vClip=0.0; return; }
+#define CULL { gl_Position = vec4(2.0,2.0,2.0,1.0); vQ=vec2(0.0); vCol=vec4(0.0); vP=vec3(0.0,0.0,2.0); vSeed=0.0; vWob=0.0; vRamp=vec4(1.0,0.0,0.0,0.0); vTr=vec2(0.0); vDis=0.0; vThin=0.0; vShp=vec3(0.0); vRes=0.0; vLum=vec2(0.0); vSoak=1.0; vClip=0.0; vD=vec2(0.0); return; }
 void main(){
   ivec2 tx = ivec2(int(mod(aIdx,uS)), int(floor(aIdx/uS)));
   vec4 a = texelFetch(tS0,tx,0), b = texelFetch(tS1,tx,0), c = texelFetch(tS2,tx,0);
@@ -1974,6 +1974,7 @@ void main(){
   float thin = 1.0 - smoothstep(2.5, 6.0, hw/(uRes.y/700.0));   // (a fine line, e.g. a cable or a dark accent)
   P += D*back + n*position.y*hw*1.18*(0.3*back + (dissolving ? 0.35 : 0.0))*thin;   // the water spreads a line as it washes out
   vTr = vec2(back, length(D)/(length(D) + 2.0*hw + 1e-3));   // (x: 1 on the old side; y: how much of the mark is trail)
+  vD = D;   // (the sweep: where it was, from where it is, px)
   vDis = dissolving ? 1.0 : 0.0; vThin = thin;
   gl_Position = vec4(P/uRes*2.0-1.0, 0.0, 1.0);
   float half_ = 0.5*(s1-s0) + hw;
@@ -2002,7 +2003,7 @@ const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix, uOwnR; varying float vSoak; varying float vClip; uniform float uDbgSoak, uSoakMark, uClipM;
+uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix, uOwnR; varying float vSoak; varying float vClip; varying vec2 vD; uniform float uDbgSoak, uSoakMark, uClipM, uSweep;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -2032,13 +2033,36 @@ float reserveAt(vec2 q){
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 float vn(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);
   return mix(mix(hash12(i),hash12(i+vec2(1,0)),u.x), mix(hash12(i+vec2(0,1)),hash12(i+vec2(1,1)),u.x), u.y); }
+// THE SWEPT SHAPE (draw mode, user: "the shape of the stroke (not the stroke itself) is clipped to the (original) object"):
+// a stroke shows only where its object is; when it is swept back to its old place, what sweeps is that CLIPPED shape — a pixel
+// of the trail counts as the object's if, some way along the sweep, x − t·D was the object (it moved by D). Sweeping the
+// stroke itself would show all the paint that was always cut away round the object.
+float mineAt(vec2 x){ float m = 0.0;
+  for(int k=0;k<4;k++){ vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
+    vec4 e = texture2D(tShapeS, (x + o*1.6)/uRes);
+    float sliverM = (1.0 - step(0.25, e.z))*step(0.5, texture2D(tDataS, (x + o*1.6)/uRes).a);   // a grass blade ON the model (not the sky)
+    m += 0.25*max(step(0.25, e.z)*(1.0 - step(7e-4, abs(e.z - vShp.x) + abs(e.w - vShp.y))), sliverM); }   // (blades are not a border: no holes)
+  return m; }
+float shadeAt(vec2 x){ float sh = 0.0;
+  for(int k=0;k<4;k++){ vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35), qq = (x + o*1.6)/uRes;
+    vec4 dq = texture2D(tDataS, qq);
+    float sliverQ = (1.0 - step(0.25, texture2D(tShapeS, qq).z))*step(0.5, dq.a);   // (a grass blade is painted with what is around it: never a hole in the shadow)
+    sh += 0.25*dq.a*max(max(1.0 - smoothstep(0.10, 0.30, texture2D(tLitS, qq).a), dq.g), sliverQ); }
+  return sh; }
+float coverAt(vec2 x){ vec2 cp = vec2(1.5); return 0.25*(texture2D(tDataS, (x + vec2(cp.x, cp.y))/uRes).a + texture2D(tDataS, (x - vec2(cp.x, cp.y))/uRes).a
+  + texture2D(tDataS, (x + vec2(cp.x, -cp.y))/uRes).a + texture2D(tDataS, (x + vec2(-cp.x, cp.y))/uRes).a); }
+#define SWEPT(f, x, v) { if(uSweep > 0.5 && length(vD) > 0.3 && vTr.y > 0.01){ for(int j=1;j<=6;j++) v = max(v, f(x - vD*(float(j)/6.0))); } }   // (6 steps: a thin object's sweep has no gaps)
 void main(){
   vec2 q = vQ;
   float e = vP.z;
   float r0 = pow(pow(abs(q.x),e)+pow(abs(q.y),e), 1.0/e);
   // the old part of a moved stroke is dissolving, as if by water: wetter, softer, thinner, its edge breaking up
   float tf = vTr.y > 0.01 ? clamp((vTr.x - (1.0 - vTr.y))/max(vTr.y, 1e-3), 0.0, 1.0) : 0.0;
-  float soft = mix(mix(0.06, 0.40, vP.x), 0.6, max(tf, vDis));
+  // THE SWEEP (draw mode, user: "a vertical stroke moving right covers a rectangle … the old part becomes more wet and
+  // dissolves, the new part starts dry and slowly goes to the final wetness"): along the sweep tf runs from the new edge (0)
+  // to the old place (1) — the stroke's own (soaked) wetness at the new edge, fully wet and dissolving toward the old one
+  float wetPx = mix(vP.x, 1.0, uSweep*smoothstep(0.0, 0.6, tf));
+  float soft = mix(mix(0.06, 0.40, wetPx), 0.6, max(tf, vDis));
   // (speed, exact: the wobble is at most 0.2*vWob either way; outside that band the mark is fully on or off without it)
   float wobMax = 0.2*vWob;
   if(uEarlyS > 0.5 && r0 - wobMax >= 1.0){ gl_FragColor = vec4(0.0); return; }   // (outside the mark: nothing is added — the strip's corners)
@@ -2048,8 +2072,7 @@ void main(){
   // NO PAINT OFF THE MODEL (user: "why the dark cat has a halo?"): the wet wash's soft edge ran past the outline onto the
   // paper — a grey halo round the black cat. The model's paint stops at its silhouette
   // (softened over ~1.5 px; its ragged edge stays inside). The sky has its own strokes.
-  if(vClip > 0.5 && uClipM > 0.0){ vec2 cp = 1.5/uRes; float cov = 0.25*(texture2D(tDataS, gl_FragCoord.xy/uRes + vec2(cp.x, cp.y)).a + texture2D(tDataS, gl_FragCoord.xy/uRes - vec2(cp.x, cp.y)).a
-      + texture2D(tDataS, gl_FragCoord.xy/uRes + vec2(cp.x, -cp.y)).a + texture2D(tDataS, gl_FragCoord.xy/uRes + vec2(-cp.x, cp.y)).a);
+  if(vClip > 0.5 && uClipM > 0.0){ float cov = coverAt(gl_FragCoord.xy); SWEPT(coverAt, gl_FragCoord.xy, cov)
     a *= mix(1.0, smoothstep(0.0, 0.75, cov), uClipM); }
   if(uEarlyS > 0.5 && a <= 0.0){ gl_FragColor = vec4(0.0); return; }
   if(vRes > 0.5) a *= 1.0 - uResvOn*reserveAt(gl_FragCoord.xy/uRes);   // (also on a moved stroke's trail: it swept over the white frames while dragging)
@@ -2075,24 +2098,11 @@ void main(){
     a *= hole;
   } else
   if(vShp.z > 1.5){                                      // a shadow is a shape: paint where there is shade, on the model
-    float sh = 0.0;
-    for(int k=0;k<4;k++){
-      vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
-      vec2 qq = (gl_FragCoord.xy + o*1.6)/uRes;
-      vec4 dq = texture2D(tDataS, qq);
-      float sliverQ = (1.0 - step(0.25, texture2D(tShapeS, qq).z))*step(0.5, dq.a);   // (a grass blade is painted with what is around it: never a hole in the shadow)
-      sh += 0.25*dq.a*max(max(1.0 - smoothstep(0.10, 0.30, texture2D(tLitS, qq).a), dq.g), sliverQ);
-    }
+    float sh = shadeAt(gl_FragCoord.xy); SWEPT(shadeAt, gl_FragCoord.xy, sh)
     a *= sh;                                             // (the trail of a moved stroke too)
   } else
   if(vShp.z > 0.5){                                      // cut in along its object's outline
-    float mine = 0.0;                                    // (4 sub-pixel samples: a smooth edge, not stair-steps once scaled up)
-    for(int k=0;k<4;k++){
-      vec2 o = vec2(k==0 ? -0.35 : k==1 ? 0.35 : k==2 ? -0.12 : 0.12, k==0 ? -0.12 : k==1 ? 0.12 : k==2 ? 0.35 : -0.35);
-      vec4 e = texture2D(tShapeS, (gl_FragCoord.xy + o*1.6)/uRes);
-      float sliverM = (1.0 - step(0.25, e.z))*step(0.5, texture2D(tDataS, (gl_FragCoord.xy + o*1.6)/uRes).a);   // a grass blade ON the model (not the sky)
-      mine += 0.25*max(step(0.25, e.z)*(1.0 - step(7e-4, abs(e.z - vShp.x) + abs(e.w - vShp.y))), sliverM);   // (blades are not a border: no holes)
-    }
+    float mine = mineAt(gl_FragCoord.xy); SWEPT(mineAt, gl_FragCoord.xy, mine)   // (4 sub-pixel samples: a smooth edge; and the swept shape)
     a *= mine;   // (the TRAIL too: exempt, it painted outside the object while moving — a sail's beam looked twice as thick)
   }
   // washing out: the pigment thins (in soft blooms) while the wet paint stays a little longer, so a line pales and
@@ -2102,9 +2112,9 @@ void main(){
   float washOut = (uEarlyS > 0.5 && tf <= 0.175) ? 0.0 : smoothstep(0.30, mix(1.0, 0.70, vThin), tf + (vn(gl_FragCoord.xy*0.02 + vSeed) - 0.5)*0.25);   // (starts well behind the new place)   // (a line washes out close behind itself)
   float pig = 1.0 - 0.85*washOut;
   a *= 1.0 - 0.45*washOut;
-  if(vP.y > 0.01){                                       // dry brush: bristle gaps, and the paint running out at the end
+  if(vP.y > 0.01 && tf < 0.6){                           // dry brush: bristle gaps, and the paint running out at the end (only the NEW part of a sweep is dry)
     float b = vn(vec2(q.y*7.0+vSeed, q.x*0.7+vSeed*0.3)), b2 = vn(vec2(q.y*19.0+vSeed*2.1, q.x*1.4));
-    float bris = mix(1.0, smoothstep(0.22,0.78, 0.6*b+0.4*b2), vP.y);
+    float bris = mix(1.0, smoothstep(0.22,0.78, 0.6*b+0.4*b2), vP.y*(1.0 - smoothstep(0.0, 0.6, tf)));
     float endFade = 1.0 - vP.y*smoothstep(0.1,1.0, q.x)*(0.5+0.8*b2);
     a *= bris*endFade;
   }
@@ -2142,6 +2152,7 @@ void main(){
     gl_FragColor = vec4(colS*vCol.a*a*k*pig*(wS + rimS), wS*a*(vRamp.z > 1.5 ? 1.0 : 0.25 + 0.75*min(k, 1.0)));
     if(uDbgSoak > 0.5) gl_FragColor.rgb = mix(vec3(0.1, 1.3, 1.3), vec3(1.3, 0.7, 0.1), vSoak)*gl_FragColor.a*0.7;   // (debug: dry red … soaked blue)
     if(uDbgSoak > 1.5) gl_FragColor.rgb = (vShp.z > 1.5 ? vec3(3.0) : vShp.z > 0.5 ? vec3(0.0, 2.5, 2.5) : vec3(2.5, 2.5, 0.0))*gl_FragColor.a;   // (debug 2: shadow passage black, cut-in red, uncut blue)
+    if(uDbgSoak > 2.5) gl_FragColor.rgb = mix(vec3(0.1, 2.0, 2.5), vec3(2.5, 1.5, 0.1), smoothstep(0.0, 0.6, tf))*gl_FragColor.a;   // (debug 3: the sweep — new part red, old part blue)
     return;
     gl_FragColor = vec4(vCol.rgb*vCol.a*a*k*pig, a*(vRamp.z > 1.5 ? 1.0 : 0.25 + 0.75*min(k, 1.0)));   // (z 2, a narrow form: water all across, so pigment strength follows k)
   } else {
@@ -2155,6 +2166,7 @@ void main(){
     gl_FragColor = vec4(vCol.rgb*vCol.a*a*pig*(wgt + rim*(1.0 + uDomK*0.05)), a*wgt);
     if(uDbgSoak > 0.5) gl_FragColor.rgb = mix(vec3(0.1, 1.3, 1.3), vec3(1.3, 0.7, 0.1), vSoak)*gl_FragColor.a*0.7;   // (debug: dry red … soaked blue)
     if(uDbgSoak > 1.5) gl_FragColor.rgb = (vShp.z > 1.5 ? vec3(3.0) : vShp.z > 0.5 ? vec3(0.0, 2.5, 2.5) : vec3(2.5, 2.5, 0.0))*gl_FragColor.a;   // (debug 2: shadow passage black, cut-in red, uncut blue)
+    if(uDbgSoak > 2.5) gl_FragColor.rgb = mix(vec3(0.1, 2.0, 2.5), vec3(2.5, 1.5, 0.1), smoothstep(0.0, 0.6, tf))*gl_FragColor.a;   // (debug 3: the sweep — new part red, old part blue)
   }
 }`;
 
@@ -2252,7 +2264,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.05}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uSweep:{value:1}, uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.05}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -3695,7 +3707,7 @@ let mood = 0;
 const motionEl = $('motion');
 function setMotion(v, save){ OPT.motion = v; motionEl.dataset.v = v;
   [...motionEl.querySelectorAll('button')].forEach(b => b.setAttribute('aria-checked', b.dataset.v === v ? 'true' : 'false'));
-  stateMat.uniforms.uSoakOn.value = strokeMat.uniforms.uSoakOnS.value = v === 'draw' ? 1 : 0; if(save) dirty = true;   // (at start-up dirty is not declared yet)
+  stateMat.uniforms.uSoakOn.value = strokeMat.uniforms.uSoakOnS.value = v === 'draw' ? 1 : 0; stateMat.uniforms.uTrailT.value = v === 'draw' ? (OPT.trailT || 0.3) : 0.03; strokeMat.uniforms.uSweep.value = v === 'draw' ? 1 : 0; if(save) dirty = true;   // (at start-up dirty is not declared yet)
   if(save) try{ localStorage.setItem('wc-motion', v); }catch(e){} }
 motionEl.addEventListener('click', e => { const b = e.target.closest('button'); if(b) setMotion(b.dataset.v, true); });
 motionEl.addEventListener('keydown', e => { if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){ e.preventDefault(); const v = OPT.motion === 'draw' ? 'cont' : 'draw'; setMotion(v, true); motionEl.querySelector(`[data-v="${v}"]`).focus(); } });
@@ -4149,7 +4161,8 @@ window.__pavilion = { soakRead:()=>{ const gl = renderer.getContext(), N = STATE
     renderer.setRenderTarget(st); gl.readBuffer(gl.COLOR_ATTACHMENT0 + 5); gl.readPixels(0, 0, STATE_S, STATE_S, gl.RGBA, gl.FLOAT, b5); gl.readBuffer(gl.COLOR_ATTACHMENT0 + 1); gl.readPixels(0, 0, STATE_S, STATE_S, gl.RGBA, gl.FLOAT, b1); gl.readBuffer(gl.COLOR_ATTACHMENT0); renderer.setRenderTarget(null);
     const info = strokeMeshes[current].attrTex[4].image.data, H = [0,0,0,0,0], byL = {};
     let n = 0, m = 0, lo = 0; for(let i=0;i<N;i++){ if(b1[i*4+3] < 0.5) continue; n++; const k = b5[i*4+2]; m += k; if(k < 0.3) lo++; H[k < 0.01 ? 0 : k < 0.1 ? 1 : k < 0.3 ? 2 : k < 0.7 ? 3 : 4]++;
-      const L = Math.round(info[i*4]), e = byL[L] || (byL[L] = [0,0]); e[0]++; if(k >= 0.01) e[1]++; }
+      const L = Math.round(info[i*4]), e = byL[L] || (byL[L] = [0,0,0,0]); e[0]++; if(k >= 0.01) e[1]++; const tl = Math.hypot(b5[i*4], b5[i*4+1]); if(tl > 0.3){ e[2]++; e[3] += tl; } }
+    for(const L in byL){ const e = byL[L]; e[3] = +(e[3]/Math.max(e[2],1)).toFixed(1); }
     return { n, mean:+(m/Math.max(n,1)).toFixed(3), dry:+(lo/Math.max(n,1)).toFixed(3), hist:H, notDryByLayer:byL, restT:+restT.toFixed(2) }; },
   rim:(v)=>{ strokeMat.uniforms.uRimK.value=v; dirty=true; }, tone:(t,d)=>{ planMat.uniforms.uToneK.value=t; strokeMat.uniforms.uDomK.value=d; resetStrokes=true; dirty=true; }, coarseSz:(v)=>{ planMat.uniforms.uCoarseSz.value=v; resetStrokes=true; dirty=true; }, cover:(a,g)=>{ planMat.uniforms.uCover1.value=a; planMat.uniforms.uCoverG.value=g; resetStrokes=true; dirty=true; }, coarse:(v)=>{ planMat.uniforms.uCoarseK.value=v; wetMat.uniforms.uPaintStop.value=v > 0 ? 1 : 0; resetStrokes=true; dirty=true; }, growMax:(v)=>{ planMat.uniforms.uGrowMax.value=v; resetStrokes=true; dirty=true; }, analyze:()=>{   // (test: what this view paints with — strokes alive per glaze and their size on the
     // paper, and the reference: how much of the picture is the model, how many shapes, how much colour varies inside them)
