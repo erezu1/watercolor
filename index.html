@@ -1969,7 +1969,7 @@ const STROKE_FS = `
 precision highp float;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix; varying float vSoak; varying float vClip; uniform float uDbgSoak, uSoakMark, uClipM;
+uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix, uOwnR; varying float vSoak; varying float vClip; uniform float uDbgSoak, uSoakMark, uClipM;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -2094,8 +2094,16 @@ void main(){
     if(uOwnPix > 0.0 && vRamp.z < 1.1){                // SHADE IN THE OWN COLOUR OF EACH PIXEL (a model whose shade keeps its colour:
       // the cats): the colour under this pixel, not the stroke's middle — one shadow stroke runs over orange and white fur
       // without carrying orange onto the white, and no seam is left where strokes stopped at the colour border
-      vec3 rp = texture2D(tRawS, gl_FragCoord.xy/uRes).rgb, Ap = -log(clamp(rp, 0.03, 1.0)); float mP = dot(Ap, vec3(0.3333));
-      vec3 ownP = mix(vec3(1.0), Ap/max(mP, 1e-3), 0.55*smoothstep(0.08, 0.35, mP));   // (part neutral, as shade is; pale fur: a soft neutral; mean absorbance 1)
+      // (from the colour averaged over about a brush's width, not the pixel: the band of warm transition pixels where a grey spot
+      // meets white fur, normalised, drew a thin orange RING round every spot — user: the spot boundary. The hue now changes
+      // smoothly across a fur border, and no one band of pixels can draw a line.)
+      vec3 rp = texture2D(tLitS, gl_FragCoord.xy/uRes).rgb; { float rr = uOwnR*uRes.y;
+        for(int j=0;j<6;j++){ float b = float(j)*1.0471976 + 0.5; rp += texture2D(tLitS, (gl_FragCoord.xy + vec2(cos(b), sin(b))*rr)/uRes).rgb; } rp /= 7.0; }
+      vec3 Ap = -log(clamp(rp, 0.03, 1.0)); float mP = dot(Ap, vec3(0.3333));
+      // (its hue as strong as the fur really is coloured — the CHROMA of its absorbance, not the hue normalised to full strength:
+      // white fur with a faint warm cast beside orange fur or round a grey spot got orange shade, an orange RING round the spot)
+      float chP = max(Ap.r, max(Ap.g, Ap.b)) - min(Ap.r, min(Ap.g, Ap.b));
+      vec3 ownP = mix(vec3(1.0), Ap/max(mP, 1e-3), 0.55*smoothstep(0.08, 0.35, mP)*smoothstep(0.10, 0.45, chP));   // (part neutral, as shade is; mean absorbance 1)
       colS = mix(vCol.rgb, ownP, uOwnPix);
     }
     gl_FragColor = vec4(colS*vCol.a*a*k*pig*(wS + rimS), wS*a*(vRamp.z > 1.5 ? 1.0 : 0.25 + 0.75*min(k, 1.0)));
@@ -2211,7 +2219,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0.15}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0.15}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
