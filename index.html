@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Watercolour</title>
+<title>3D paintings</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3.5c-4.9 0-8.5 3.6-8.5 8.1 0 4.6 3.7 8.4 8 8.4 1.5 0 2.3-.8 2.3-1.9 0-1.4-1.3-1.8-1.3-3.1 0-1.1.9-1.8 2-1.8h2.2c2.4 0 4-1.6 4-3.9 0-3.4-3.8-5.8-8.7-5.8z' fill='%23f4efe4' stroke='%233a3833' stroke-width='1.7' stroke-linejoin='round'/%3E%3Ccircle cx='7.6' cy='11.4' r='1.5' fill='%233f6fa8'/%3E%3Ccircle cx='9.6' cy='7.6' r='1.5' fill='%23c2463c'/%3E%3Ccircle cx='14' cy='7' r='1.5' fill='%23d9a63a'/%3E%3Ccircle cx='17.2' cy='9.9' r='1.5' fill='%235f8a4e'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -225,7 +225,7 @@ body.peeking .panel,body.peeking .pick-btn,body.peeking .menu-btn{opacity:0}
 </head>
 <body>
 <div id="sheet">
-  <canvas id="c" tabindex="0" aria-label="A domed pavilion painted in watercolour. Drag to rotate the painting, pinch to zoom."></canvas>
+  <canvas id="c" tabindex="0" aria-label="A domed pavilion painted in watercolor. Drag to rotate the painting, pinch to zoom."></canvas>
   <div class="hint welcome" id="hint" aria-hidden="true">
     <span class="hint-welcome">
       <span class="hw-title">Welcome to 3D paintings</span>
@@ -3735,26 +3735,26 @@ function setMood(i, announce){
 // The paintings: the button at the bottom left opens a chooser (picture + name), with the credit of the chosen one.
 // To add a model: add it here (with its credit and a thumbnail in assets/thumbs/) and to MODELS.
 const PAINTINGS = [
-  { id:'lighthouse', title:'The Lighthouse', desc:'A lighthouse on its rocky island', aria:'A lighthouse on a small island, painted in watercolour', heavy:true, data:'lighthouse',
+  { id:'lighthouse', title:'The Lighthouse', desc:'A lighthouse on its rocky island', aria:'A lighthouse on a small island, painted in watercolor', heavy:true, data:'lighthouse',
     credit:'“Low-poly Lighthouse” by <a href="https://sketchfab.com/3d-models/low-poly-lighthouse-1a3a243e153343eeb50cadca536b4e59" target="_blank" rel="noopener">Murriarty</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page and used as the painter’s reference.' },
-  { id:'mill3', title:'The Dutch Mill', desc:'A stage mill above the grass', aria:'A Dutch windmill painted in watercolour', heavy:true, data:'dutch_windmill_2',
+  { id:'mill3', title:'The Dutch Mill', desc:'A stage mill above the grass', aria:'A Dutch windmill painted in watercolor', heavy:true, data:'dutch_windmill_2',
     credit:'“Dutch windmill” by <a href="https://sketchfab.com/3d-models/dutch-windmill-45c2c76d8fb94f1cbdda4329cd7aeabf" target="_blank" rel="noopener">Holywood</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (grass added around it) and used as the painter’s reference.' },
-  { id:'pavilion', title:'The Pavilion', desc:'A garden temple among cypresses', aria:'A domed pavilion painted in watercolour',
+  { id:'pavilion', title:'The Pavilion', desc:'A garden temple among cypresses', aria:'A domed pavilion painted in watercolor',
     credit:'An original scene, modelled for this page.' },
-  { id:'cats', title:'The Cat Trio', desc:'Three round cats on the grass', aria:'Three chubby cats on the grass, painted in watercolour', heavy:true, data:'cats',
+  { id:'cats', title:'The Cat Trio', desc:'Three round cats on the grass', aria:'Three chubby cats on the grass, painted in watercolor', heavy:true, data:'cats',
     credit:'“Chonky Cat Trio” by <a href="https://sketchfab.com/3d-models/chonky-cat-trio-d9a2d94179384803af7456d633283496" target="_blank" rel="noopener">Kanna-Nakajima</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (the base slab left out; grass below) and used as the painter’s reference.' },
-  { id:'tokyo', hidden:true, title:'Littlest Tokyo', desc:'A tiny street corner', aria:'A tiny city painted in watercolour', heavy:true,
+  { id:'tokyo', hidden:true, title:'Littlest Tokyo', desc:'A tiny street corner', aria:'A tiny city painted in watercolor', heavy:true,
     credit:'“Littlest Tokyo” by <a href="https://artstation.com/artwork/1AGwX" target="_blank" rel="noopener">Glen Fox</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (outline shells and glass removed) and used as the painter’s reference.' },
-  { id:'mill2', title:'The Windmill', desc:'An old mill in the grass', aria:'A windmill standing in grass, painted in watercolour', heavy:true, data:'windmill_game_ready',
+  { id:'mill2', title:'The Windmill', desc:'An old mill in the grass', aria:'A windmill standing in grass, painted in watercolor', heavy:true, data:'windmill_game_ready',
     credit:'“Windmill (game ready)” by <a href="https://sketchfab.com/3d-models/windmill-game-ready-6a006afce57a447baa60c7a6791f0086" target="_blank" rel="noopener">LamedeFeu</a>, <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener">CC BY-NC-SA 4.0</a>. Converted for this page (grass added around it) and used as the painter’s reference; the converted model is shared under the same licence.' },
-  { id:'moomin', title:'The Moomin House', desc:'A round blue house with a red roof', aria:'The Moomin house painted in watercolour', heavy:true, data:'moomin_house',
+  { id:'moomin', title:'The Moomin House', desc:'A round blue house with a red roof', aria:'The Moomin house painted in watercolor', heavy:true, data:'moomin_house',
     credit:'“Moomin House” by <a href="https://sketchfab.com/3d-models/moomin-house-f262979495b943e2b28bc7a8a72c7cd4" target="_blank" rel="noopener">Kuutti Siitonen</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (simplified, grass added around it) and used as the painter’s reference. Moomin designs © Moomin Characters Ltd.' },
-  { id:'bridge', title:'The Japanese Bridge', desc:'A red bridge over a garden pond', aria:'A Japanese garden with a red bridge, painted in watercolour', heavy:true, data:'bridge_garden',
+  { id:'bridge', title:'The Japanese Bridge', desc:'A red bridge over a garden pond', aria:'A Japanese garden with a red bridge, painted in watercolor', heavy:true, data:'bridge_garden',
     credit:'“Japanese Bridge Garden” by <a href="https://sketchfab.com/3d-models/japanese-bridge-garden-d122e17593eb4012913cde927486d15a" target="_blank" rel="noopener">kristenlee</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page and used as the painter’s reference.' },
-  { id:'medieval', title:'The Hill Castle', desc:'A walled castle high on its terraced hill', aria:'A walled castle on a terraced hill, painted in watercolour', heavy:true, data:'medieval',
-    credit:'“Medieval castle with village” by <a href="https://sketchfab.com/3d-models/medieval-castle-with-village-5109b5e46e064790badecedf8f6d2ef6" target="_blank" rel="noopener">Artbake Graphics</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (the castle and its hill only: the village, forests and rock spires left out; its grey walls recoloured) and used as the painter’s reference.' },
-  { id:'castle', title:'The Floating Castle', desc:'A castle on the back of a flying turtle', aria:'A castle on the back of a flying turtle, painted in watercolour', heavy:true, data:'floating_castle',
-    credit:'“Floating Castle” by <a href="https://sketchfab.com/3d-models/floating-castle-1e157bab3a4042eb834ca07d73aa28ce" target="_blank" rel="noopener">Shahriar Shahrabi</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (simplified, colours read from its texture; the clouds made plain white; sky, birds, the flying machine, effects and outlines removed) and used as the painter’s reference.' },
+  { id:'medieval', title:'The Hill Castle', desc:'A walled castle high on its terraced hill', aria:'A walled castle on a terraced hill, painted in watercolor', heavy:true, data:'medieval',
+    credit:'“Medieval castle with village” by <a href="https://sketchfab.com/3d-models/medieval-castle-with-village-5109b5e46e064790badecedf8f6d2ef6" target="_blank" rel="noopener">Artbake Graphics</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (the castle and its hill only: the village, forests and rock spires left out; its grey walls recolored) and used as the painter’s reference.' },
+  { id:'castle', title:'The Floating Castle', desc:'A castle on the back of a flying turtle', aria:'A castle on the back of a flying turtle, painted in watercolor', heavy:true, data:'floating_castle',
+    credit:'“Floating Castle” by <a href="https://sketchfab.com/3d-models/floating-castle-1e157bab3a4042eb834ca07d73aa28ce" target="_blank" rel="noopener">Shahriar Shahrabi</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Converted for this page (simplified, colors read from its texture; the clouds made plain white; sky, birds, the flying machine, effects and outlines removed) and used as the painter’s reference.' },
 ].filter(p => !p.hidden && (p.id === 'pavilion' || typeof DecompressionStream !== 'undefined') && (!p.data || (window.MODEL_DATA && window.MODEL_DATA[p.data])));
 const thumb = id => (window.THUMBS && window.THUMBS[id]) || '';
 const paintingsEl = $('paintings'), picker = $('picker'), pickBtn = $('pickBtn');
@@ -3782,7 +3782,7 @@ function fromAddress(){
 }
 function showAddress(name){
   const p = PAINTINGS.find(q=>q.id===name); if(!p) return;
-  document.title = p.title + ' in watercolour';
+  document.title = '3D paintings';
   if(location.hash !== '#'+slugOf(p)) history[location.hash ? 'pushState' : 'replaceState'](null, '', '#'+slugOf(p));   // (Back returns to the painting before)
 }
 window.addEventListener('popstate', ()=>{ const id = fromAddress(); if(id && id !== current) goTo(id); });
