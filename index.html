@@ -455,8 +455,8 @@ function fail(why){ if(!window.__fbShown && !OPT.noFallback){ window.__fbShown =
 if(!window.THREE){ fail(); return; }
 const THREE = window.THREE;
 const OPT = window.__OPT = Object.assign({ quad:1, cull:1, early:1, sort:1, skipPlan:1, strokeEarly:1, wetEarly:1, resolveDead:1 }, (()=>{ try{ return JSON.parse(new URLSearchParams(location.search).get('opt') || '{}'); }catch(e){ return {}; } })());   // speed-ups (all exact: same picture); each can be switched off for A/B tests with ?opt={"quad":0,...}
-// (a phone: see intScale and quality below)
-const PHONE = (()=>{ try{ return matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) < 900; }catch(e){ return false; } })();
+// (a phone: see intScale and quality below; ?mobile forces the phone mode on a desktop, for tests)
+const PHONE = /[?&]mobile\b/.test(location.search) || (()=>{ try{ return matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) < 900; }catch(e){ return false; } })();
 const QS = new URLSearchParams(location.search);
 if(OPT.halfPlan === undefined) OPT.halfPlan = PHONE ? 1 : 0;   // (every phone: confirmed smooth on the user's phone; n: n light frames per full plan)
 if(OPT.fence === undefined) OPT.fence = PHONE ? 2 : 0;   // (n: at most n frames queued on the GPU. Phone, measured: 2 = same mean as none, but no 100+ ms stalls; 1 = slower)
@@ -4060,6 +4060,8 @@ canvas.addEventListener('keydown', e=>{
 /*  expensive painting works at a lower one and is smoothed up.        */
 /* ------------------------------------------------------------------ */
 const camera = new THREE.PerspectiveCamera(30, 1, 1, 100);
+// the phone-only anchor pass is first drawn mid-drag: compile it now, so a driver that rejects it fails at load (the fallback), not on the first drag
+if(OPT.halfPlan){ renderer.setRenderTarget(rtAnch); renderer.render(anchScene, camera); renderer.setRenderTarget(null); }   // (a draw, not compile(): three checks a program for errors on its first use)
 const rtOpts = { type:THREE.HalfFloatType, format:THREE.RGBAFormat, minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, depthBuffer:false, generateMipmaps:false };
 let Wf=0,Hf=0,W=0,H=0, rtMain=null, rtGlaze=null, rtRes=null, resCur=0, rtWet=null, rtLit=null, rtThin=null, rtShapeM=null;
 // A PHONE starts at settings it can carry (measured on a phone: 30 fps settling, 20–30 dragging at 0.62 and all strokes;
