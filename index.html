@@ -2338,7 +2338,8 @@ void main(){
   vec4 prev = texelFetch(tP4, tx, 0); oG = texelFetch(tP0, tx, 0);
   if(idx >= uNT || (prev.x == 0.0 && prev.y == 0.0 && prev.z == 0.0)){ oA = prev; return; }
   float layer = texelFetch(tA4, tx, 0).x;
-  if(layer > 5.5){ vec2 o = vec2(uDYaw/uAspect*uRes.x, uDPitch*1.866*uRes.y);   // (the sky's tilt: as SKY_TILT) oA = prev + vec4(o, 0.0, 0.0); oG.xy += o; return; }
+  // (the sky's tilt, as SKY_TILT: 1.866 screens per radian)
+  if(layer > 5.5){ vec2 o = vec2(uDYaw/uAspect*uRes.x, uDPitch*1.866*uRes.y); oA = prev + vec4(o, 0.0, 0.0); oG.xy += o; return; }
   vec3 pos = texelFetch(tA0, tx, 0).xyz, nor = texelFetch(tA1, tx, 0).xyz;
   vec4 c = uProj*viewMatrix*vec4(pos, 1.0); vec2 ndc = c.xy/max(c.w, 1e-3), uv = ndc*0.5 + 0.5;
   float vis = prev.z;
