@@ -2042,7 +2042,7 @@ const STROKE_VS = `
 precision highp float; precision highp sampler2D;
 attribute vec4 aRnd; attribute vec4 aInfo; attribute float aIdx;
 uniform sampler2D tS0; uniform sampler2D tS1; uniform sampler2D tS2; uniform sampler2D tS3; uniform sampler2D tS5;
-uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap, uFreshW, uSoakOnS, uFreshWL, uLineGrow, uDragK, uSkyDryK;
+uniform float uS; uniform vec2 uRes; uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform float uCut; uniform sampler2D tLineV; uniform float uDryStroke, uSoakMin, uDryCap, uFreshW, uFreshWSky, uSoakOnS, uFreshWL, uLineGrow, uDragK, uSkyDryK;
 varying vec2 vLum; varying float vSoak; varying float vClip;
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes;
 ${ARC_GLSL}
@@ -2078,7 +2078,8 @@ void main(){
   // FRESH STROKES ARE A LITTLE THINNER (user: "the thickness slightly decrease as they move, to give the illusion that new
   // strokes are painted"): a stroke starts at uFreshW of its width and grows to full width as it soaks in (lines keep theirs)
   // (width by speed through the soak, which falls with it: a very fast turn starts the marks as almost nothing — user)
-  hw *= mix(uFreshW, 1.0, soakT*sqrt(soakT));   // (every stroke, lines too: one rule)   // (LINES are always dry: they follow the turn itself — thinner still while it moves, back to full width as the picture soaks in)
+  hw *= mix(layer > 5.5 ? uFreshWSky : uFreshW, 1.0, soakT*sqrt(soakT));   // (the SKY's own floor, lower — user: its fast-turn size was liked)
+    // (every stroke, lines too: one rule)   // (LINES are always dry: they follow the turn itself — thinner still while it moves, back to full width as the picture soaks in)
   // SOAK, a basic rule of the movement for EVERY stroke — the sky's too (user: "for all strokes this rule should be a basic part
   // of the movement engine"): fresh paint is DRY — crisp, broken by the bristles — and soaks in once the view is still
   { wet *= mix(uSoakMin, 1.0, soakS); dry = max(dry, (layer < 0.5 || layer > 5.5 ? 0.7 : 0.9)*(1.0 - soakS)); }
@@ -2379,7 +2380,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uSkyDryK:{value:OPT.skyDryK || 0.35}, uDragK:{value:OPT.dragK !== undefined ? OPT.dragK : 0.5}, uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.30}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uSkyDryK:{value:OPT.skyDryK || 0.35}, uDragK:{value:OPT.dragK !== undefined ? OPT.dragK : 0.5}, uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.30}, uFreshWSky:{value:OPT.freshWSky !== undefined ? OPT.freshWSky : 0.15}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
