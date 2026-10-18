@@ -415,8 +415,8 @@ if(!renderer.capabilities.isWebGL2){ fail('WebGL 2 is not available in this brow
 // LITE (user: older phones that can run it, but slowly): about half the strokes, each bigger (faces short of strokes grow
 // theirs to cover), a smaller stroke memory, a lower painting resolution, the plan followed less often. Decided before
 // anything is built: the number of strokes can't change later without starting the painting over. Chosen by a weak or
-// software GPU, <= 4 GB of memory, or this device having been too slow before (localStorage 'wc-lite', set by the
-// slow-frame guard); ?lite forces it, ?lite=0 forbids it (and forgets the remembered choice).
+// software GPU, <= 4 GB of memory, or this device having been too slow before (localStorage 'wc-lite' '1', set by the
+// slow-frame guard; '0' forbids it); ?lite forces it, ?lite=0 forbids it (and forgets the remembered choice).
 const GPU = (()=>{ try{ const gl = renderer.getContext(), di = gl.getExtension('WEBGL_debug_renderer_info'); return String(di ? gl.getParameter(di.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)); }catch(e){ return ''; } })();
 function weakGPU(g){
   if(/SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(g)) return true;
@@ -424,10 +424,15 @@ function weakGPU(g){
   m = g.match(/Mali-?\s*(T\d+|G\d+|\d{3})/i); if(m) return /^(T|\d)/i.test(m[1]) || /^G(31|51|52|57|68|71|72|76)$/i.test(m[1]);   // (Mali T and 400-series, the budget Gs, the 2017–19 flagship Gs)
   return /PowerVR Rogue|GE8\d{3}|GX6\d{3}|GM9\d{3}/i.test(g);   // (PowerVR's older Rogue line: the Pixel 10's D-Series is not one)
 }
+// (a phone test left half-way — the page closed between its two runs — had forced the other mode: the phone's own
+// setting is put back; while a test is running, its session entry says so and nothing is touched)
+try{ const left = localStorage.getItem('wc-bench-orig'); if(left !== null && !sessionStorage.getItem('wc-bench')){ const o = JSON.parse(left).orig;
+  if(o === null || o === undefined) localStorage.removeItem('wc-lite'); else localStorage.setItem('wc-lite', o); localStorage.removeItem('wc-bench-orig'); } }catch(e){}
 const LITE = (()=>{ const q = QS.get('lite');
   if(q !== null){ try{ if(q === '0') localStorage.removeItem('wc-lite'); }catch(e){} return q !== '0'; }
-  let mem = false; try{ mem = localStorage.getItem('wc-lite') === '1'; }catch(e){}
-  return mem || weakGPU(GPU) || (navigator.deviceMemory > 0 && navigator.deviceMemory <= 4); })();
+  let mem = null; try{ mem = localStorage.getItem('wc-lite'); }catch(e){}
+  if(mem === '0') return false;                          // (a stored choice of the normal mode: the phone test page's second run)
+  return mem === '1' || weakGPU(GPU) || (navigator.deviceMemory > 0 && navigator.deviceMemory <= 4); })();
 if(OPT.halfPlan === undefined) OPT.halfPlan = LITE ? 2 : PHONE ? 1 : 0;   // (every phone: confirmed smooth on the user's phone; n: n light frames per full plan; lite: 2)
 if(OPT.fence === undefined) OPT.fence = PHONE || LITE ? 2 : 0;   // (n: at most n frames queued on the GPU. Phone, measured: 2 = same mean as none, but no 100+ ms stalls; 1 = slower)
 if(OPT.settleEvery === undefined) OPT.settleEvery = LITE ? 3 : PHONE ? 2 : 1;   // (while strokes settle, the plan follows the paint every n-th frame)   // (while the view moves, the full plan every other frame; the anchors every frame)
@@ -4423,6 +4428,10 @@ window.__pavilion = { gpuMB:()=>{ const out = {}; let tot = 0;   // (test: MB of
 requestAnimationFrame(t=>{ last=t; born=t; frame(t); });
 })();
 
+</script>
+<script>
+// THE PHONE TEST (assets/bench.js) only with ?bench in the address: normal visits never fetch it
+if(/[?&]bench\b/.test(location.search)){ var bs = document.createElement('script'); bs.src = 'assets/bench.js'; document.body.appendChild(bs); }
 </script>
 </body>
 </html>
