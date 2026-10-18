@@ -2062,7 +2062,7 @@ const STROKE_FS = `
 precision highp float; precision highp sampler2D;   // (the same sampler precision as STROKE_VS: the Pixel 10's PowerVR driver rejects a mismatch — tShapeS is in both)
 varying vec2 vQ; varying vec4 vCol; varying vec3 vP; varying float vSeed; varying float vWob; varying vec4 vRamp; varying vec2 vTr; varying float vDis; varying float vThin; varying vec3 vShp; varying float vRes; varying vec2 vLum;
 uniform sampler2D tShapeS; uniform sampler2D tLitS; uniform sampler2D tDataS; uniform sampler2D tThinCS; uniform sampler2D tThinDS; uniform vec2 uRes; uniform float uEarlyS;
-uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix, uOwnR; varying float vSoak; varying float vClip; uniform float uDbgSoak, uSoakMark, uClipM;
+uniform sampler2D tLineS; uniform sampler2D tRawS; uniform float uLineOcc; uniform float uPixShade, uDomK, uRimK, uResvOn; uniform float uOwnPix, uOwnR; varying float vSoak; varying float vClip; uniform float uDbgSoak, uSoakMark, uClipM, uNoPix;
 // THE SHADE UNDER THIS PIXEL, as the planner reads it (shadeA / shadeRel, with the default lit-side 0.6): a graded shadow
 // stroke takes its strength here from the model's own shade at each pixel, not from 5 samples interpolated across the
 // stroke — so all the strokes laid over one shaded strip agree where its dark is, and the strip is ONE continuous wash
@@ -2093,6 +2093,7 @@ float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33
 float vn(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);
   return mix(mix(hash12(i),hash12(i+vec2(1,0)),u.x), mix(hash12(i+vec2(0,1)),hash12(i+vec2(1,1)),u.x), u.y); }
 void main(){
+  if(uNoPix > 0.5){ gl_FragColor = vec4(0.0); return; }   // (test: the marks drawn, no pixel work — splits a phone's stroke cost)
   vec2 q = vQ;
   float e = vP.z;
   float r0 = pow(pow(abs(q.x),e)+pow(abs(q.y),e), 1.0/e);
@@ -2317,7 +2318,7 @@ const anchScene = new THREE.Scene(); { const q = new THREE.Mesh(new THREE.PlaneG
 let lastFullPlan = { yaw:0, pitch:0 }, planLight = false, frameKind = 0, lightRun = 0;
 const planQScene = new THREE.Scene(); { const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2), planQMat); q.frustumCulled=false; planQScene.add(q); }
 const strokeMat = new THREE.ShaderMaterial({
-  uniforms:{ uSkyDryK:{value:OPT.skyDryK || 0.35}, uDragK:{value:OPT.dragK !== undefined ? OPT.dragK : 0.5}, uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.15}, uFreshWSky:{value:OPT.freshWSky !== undefined ? OPT.freshWSky : 0.05}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
+  uniforms:{ uNoPix:{value:0}, uSkyDryK:{value:OPT.skyDryK || 0.35}, uDragK:{value:OPT.dragK !== undefined ? OPT.dragK : 0.5}, uSoakOnS:{value:1}, uFreshWL:{value:OPT.freshWL !== undefined ? OPT.freshWL : 0.05}, uLineGrow:{value:1}, uFreshW:{value:OPT.freshW !== undefined ? OPT.freshW : 0.15}, uFreshWSky:{value:OPT.freshWSky !== undefined ? OPT.freshWSky : 0.05}, uClipM:{value:OPT.clipM !== undefined ? OPT.clipM : 1}, uDryCap:{value:OPT.dryCap !== undefined ? OPT.dryCap : 0.9}, uDbgSoak:{value:OPT.dbgSoak || 0}, uSoakMark:{value:OPT.soakMark !== undefined ? OPT.soakMark : 0.8}, uSoakMin:{value:OPT.soakMin !== undefined ? OPT.soakMin : 0}, tLineV:{value:null}, uDryStroke:{value:OPT.dryStroke !== undefined ? OPT.dryStroke : 2}, tS0:{value:null}, tS1:{value:null}, tS2:{value:null}, tS3:{value:null}, tS5:{value:null}, uS:{value:STATE_S}, uRes:{value:new THREE.Vector2(1,1)}, tShapeS:{value:null}, tLitS:{value:null}, tDataS:{value:null}, tThinCS:{value:null}, tThinDS:{value:null}, uCut:{value:1}, uEarlyS:{value:1}, tLineS:{value:null}, uPixShade:{value:1}, uOwnPix:{value:0}, uOwnR:{value:OPT.ownR !== undefined ? OPT.ownR : 0.012}, uResvOn:{value:1}, tRawS:{value:null}, uLineOcc:{value:OPT.lineOcc === 0 ? 0 : 1}, uDomK:{value:10}, uRimK:{value:1.2} },
   vertexShader:STROKE_VS, fragmentShader:STROKE_FS,
   transparent:true, depthTest:false, depthWrite:false, side:THREE.DoubleSide,
   blending:THREE.CustomBlending, blendEquation:THREE.AddEquation,
@@ -4190,7 +4191,7 @@ function render(dt){
   // 3. paint the strokes, each glaze into its own wash
   const S = strokeMat.uniforms;
   S.tS0.value = wrS.texture[0]; S.tS1.value = wrS.texture[1]; S.tS2.value = wrS.texture[2]; S.tS3.value = wrS.texture[3]; S.tS5.value = wrS.texture[5];
-  for(let g=0; g<4; g++){ renderer.setRenderTarget(rtGlaze[g]); renderer.setClearColor(CLEAR_ZERO, 0); if(window.__noStrokes){ renderer.clear(); } else renderer.render(strokeScenes[g], camera); if(__sync) __sync('g'+g); }
+  for(let g=0; g<4; g++){ renderer.setRenderTarget(rtGlaze[g]); renderer.setClearColor(CLEAR_ZERO, 0); if(window.__noStrokes || ((window.__skipGlaze || 0) >> g) & 1){ renderer.clear(); } else renderer.render(strokeScenes[g], camera); if(__sync) __sync('g'+g); }
   // 4. the washes dry (merge, crisp ragged borders, pigment at the edges)
   const Wm = wetMat.uniforms, wr = 4.2*Math.min(W,H)/700*(1 - 0.5*cfgFor(current).detail);                  // the paint flows ~17 px each way, within its shape
   Wm.tA.value = rtGlaze[1].texture; Wm.tB.value = rtGlaze[2].texture; Wm.tF.value = rtGlaze[3].texture; Wm.uFirst.value = 1; Wm.uStep.value.set(wr/W, 0);   // (tF unused here, but never the target)
@@ -4306,7 +4307,8 @@ fit(); setMood(0,false); warmShaders();
 { const want = fromAddress(), first = want || PAINTINGS[0].id;
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   current = null; goTo(first, true); }   // (the first painting straight away: no stand-in pavilion behind the paper, no fade-out to wait for)
-window.__pavilion = { scale:(v)=>{ intScale = v; fit(); dirty = true; }, devCap:(mp)=>{ devCap = mp*1e6; fit(); dirty = true; },   // (test: painting resolution / screen pixel cap)
+window.__pavilion = { noPix:(v)=>{ strokeMat.uniforms.uNoPix.value = v ? 1 : 0; dirty = true; },   // (test: strokes without their pixel work)
+  scale:(v)=>{ intScale = v; fit(); dirty = true; }, devCap:(mp)=>{ devCap = mp*1e6; fit(); dirty = true; },   // (test: painting resolution / screen pixel cap)
   gpuMB:()=>{ const out = {}; let tot = 0;   // (test: MB of each painting's data now on the GPU — resident = its stroke textures are uploaded)
     Object.keys(strokeMeshes).forEach(k=>{ const M = strokeMeshes[k]; if(!M.attrTex.some(t=>renderer.properties.get(t).__webglTexture)) return;
       const r = gpuResources(k); let b = 0, seen = new Set();

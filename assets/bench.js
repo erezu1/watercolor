@@ -117,23 +117,24 @@ async function finish(out, both){
 // long each frame took to finish on the GPU (a fence per frame, seen at the next screen refresh: in steps of ~17 ms).
 const VARIANTS = [
   ['base', 'as now', () => {}],
-  ['plan3', 're-plan every 3rd frame', O => { O.halfPlan = 2; }],
-  ['planRare', 'no re-planning while turning', O => { O.halfPlan = 1000; }],
-  ['fence0', 'no frame pacing', O => { O.fence = 0; }],
   ['noStrokes', 'without the strokes', () => { window.__noStrokes = true; }],
-  ['res40', 'painting at 0.40', (O, P) => { P.scale(0.40); }],
-  ['screen1', 'screen picture 1 MP', (O, P) => { P.devCap(1.0); }],
-];
-const DIAG_SCENES = ['lighthouse', 'medieval'];
+  ['noPix', 'strokes, no pixel work', (O, P) => { P.noPix(1); }],
+  ['noWash', 'without the wash layer', () => { window.__skipGlaze = 1; }],
+  ['noColour', 'without the colour layer', () => { window.__skipGlaze = 2; }],
+  ['noShade', 'without the shade layer', () => { window.__skipGlaze = 4; }],
+  ['plan4', 're-plan every 4th frame', O => { O.halfPlan = 3; }],
+  ['planRare', 'no re-planning while turning', O => { O.halfPlan = 1000; }],
+]
+const DIAG_SCENES = ['lighthouse', 'cats', 'medieval'];
 function stats(A){ const B = A.slice().sort((a,b)=>a-b); return { mean:+mean(A).toFixed(1), median:+q(A,0.5).toFixed(1), p90:+q(A,0.9).toFixed(1) }; }
 async function diag(){
   $('bAgain').hidden = true; $('bCopy').hidden = true; $('bTable').hidden = true;
-  $('bInfo').textContent = 'Leave the phone still with the screen on. The test turns two paintings, changing one thing at a time, about a minute and a half.';
+  $('bInfo').textContent = 'Leave the phone still with the screen on. The test turns three paintings, changing one thing at a time, about two minutes.';
   let P; for(let i=0;i<300 && !(P = window.__pavilion); i++) await sleep(100);
   if(!P){ $('bState').textContent = 'The painting did not start on this phone.'; return; }
   P.stop(); const O = window.__OPT || {}; O.noAdapt = 1;
   const base = { halfPlan:O.halfPlan, fence:O.fence, intScale:P.perfInfo().intScale };
-  const reset = () => { O.halfPlan = base.halfPlan; O.fence = base.fence; window.__noStrokes = false; P.devCap(2.7); P.scale(base.intScale); };
+  const reset = () => { O.halfPlan = base.halfPlan; O.fence = base.fence; window.__noStrokes = false; window.__skipGlaze = 0; if(P.noPix) P.noPix(0); };
   const out = { id:new Date().toISOString().replace(/[^0-9]/g,'').slice(0,14), v:3, kind:'diag', at:new Date().toISOString(), device:device(P), base, lite:!!P.perfInfo().lite, scenes:[] };
   steps = DIAG_SCENES.length*VARIANTS.length; progress = 0; const c = $('c'), gl = c.getContext('webgl2');
   for(const id of DIAG_SCENES){
