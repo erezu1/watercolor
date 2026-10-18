@@ -433,7 +433,7 @@ const LITE = (()=>{ const q = QS.get('lite');
   let mem = null; try{ mem = localStorage.getItem('wc-lite'); }catch(e){}
   if(mem === '0') return false;                          // (a stored choice of the normal mode: the phone test page's second run)
   return mem === '1' || weakGPU(GPU) || (navigator.deviceMemory > 0 && navigator.deviceMemory <= 4); })();
-if(OPT.halfPlan === undefined) OPT.halfPlan = LITE ? 2 : PHONE ? 1 : 0;   // (every phone: confirmed smooth on the user's phone; n: n light frames per full plan; lite: 2)
+if(OPT.halfPlan === undefined) OPT.halfPlan = LITE ? 2 : PHONE ? 3 : 0;   // (n light frames per full plan. Phones 3 — re-plan every 4th frame while turning: the user's Pixel 8a measured 44 → 38 ms (Lighthouse), 44.5 → 40 (Hill Castle); was 1. Lite: 2)
 if(OPT.fence === undefined) OPT.fence = PHONE || LITE ? 2 : 0;   // (n: at most n frames queued on the GPU. Phone, measured: 2 = same mean as none, but no 100+ ms stalls; 1 = slower)
 if(OPT.settleEvery === undefined) OPT.settleEvery = LITE ? 3 : PHONE ? 2 : 1;   // (while strokes settle, the plan follows the paint every n-th frame)   // (while the view moves, the full plan every other frame; the anchors every frame)
 // THE GPU CONTEXT LOST (a low-memory phone reclaims it, or the app was in the background): no dead canvas — a card that
@@ -3151,7 +3151,7 @@ function addModel(name, root, geo, mat, countScale){
   const dP = Math.min(1, Math.max(0, (Math.log((root.userData.nShapes||50)/80))/Math.log(700/80)));
   root.userData.brushK = 1 - 0.38*dP;
   const LN = LAYERS.reduce((a,l)=>a+l.n, 0);
-  countScale = Math.min((countScale||1)*(1 + 1.4*dP), (OPT.capN || (LITE ? 52000 : PHONE ? 88064 : 86302))/LN);   // (the counts in use since this morning's phone/desktop builds: their pictures unchanged)   // (the model's own strokes; the rest of the memory is the detail pool)
+  countScale = Math.min((countScale||1)*(1 + 1.4*dP), (OPT.capN || (LITE ? 52000 : PHONE ? 60000 : 86302))/LN);   // (the counts in use since this morning's phone/desktop builds: their pictures unchanged)   // (the model's own strokes; the rest of the memory is the detail pool)
   strokeMeshes[name] = makeStrokeMesh(root, countScale);
   loaded[name] = true;
 }
