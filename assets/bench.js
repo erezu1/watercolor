@@ -112,6 +112,58 @@ async function finish(out, both){
   $('bCopy').hidden = saved; $('bAgain').hidden = false;
   $('bCopy').onclick = async () => { const t = JSON.stringify(out); try{ await navigator.clipboard.writeText(t); $('bCopy').textContent = 'Copied'; }catch(e){ const s = getSelection(), r = document.createRange(); r.selectNodeContents($('bTable')); s.removeAllRanges(); s.addRange(r); } };
 }
-$('bAgain').onclick = () => { session('wc-bench', null); progress = 0; run(true); };
-setTimeout(() => run(false), 1500);
+// THE DIAGNOSTIC (?bench=diag, and the private test page): what limits a turning frame on this phone. The same painting
+// is turned with one thing changed at a time; for each: the time between frames, the JavaScript time of a frame, and how
+// long each frame took to finish on the GPU (a fence per frame, seen at the next screen refresh: in steps of ~17 ms).
+const VARIANTS = [
+  ['base', 'as now', () => {}],
+  ['plan3', 're-plan every 3rd frame', O => { O.halfPlan = 2; }],
+  ['planRare', 'no re-planning while turning', O => { O.halfPlan = 1000; }],
+  ['fence0', 'no frame pacing', O => { O.fence = 0; }],
+  ['noStrokes', 'without the strokes', () => { window.__noStrokes = true; }],
+  ['res40', 'painting at 0.40', (O, P) => { P.scale(0.40); }],
+  ['screen1', 'screen picture 1 MP', (O, P) => { P.devCap(1.0); }],
+];
+const DIAG_SCENES = ['lighthouse', 'medieval'];
+function stats(A){ const B = A.slice().sort((a,b)=>a-b); return { mean:+mean(A).toFixed(1), median:+q(A,0.5).toFixed(1), p90:+q(A,0.9).toFixed(1) }; }
+async function diag(){
+  $('bAgain').hidden = true; $('bCopy').hidden = true; $('bTable').hidden = true;
+  $('bInfo').textContent = 'Leave the phone still with the screen on. The test turns two paintings, changing one thing at a time, about a minute and a half.';
+  let P; for(let i=0;i<300 && !(P = window.__pavilion); i++) await sleep(100);
+  if(!P){ $('bState').textContent = 'The painting did not start on this phone.'; return; }
+  P.stop(); const O = window.__OPT || {}; O.noAdapt = 1;
+  const base = { halfPlan:O.halfPlan, fence:O.fence, intScale:P.perfInfo().intScale };
+  const reset = () => { O.halfPlan = base.halfPlan; O.fence = base.fence; window.__noStrokes = false; P.devCap(2.7); P.scale(base.intScale); };
+  const out = { id:new Date().toISOString().replace(/[^0-9]/g,'').slice(0,14), v:3, kind:'diag', at:new Date().toISOString(), device:device(P), base, lite:!!P.perfInfo().lite, scenes:[] };
+  steps = DIAG_SCENES.length*VARIANTS.length; progress = 0; const c = $('c'), gl = c.getContext('webgl2');
+  for(const id of DIAG_SCENES){
+    if(window.__needData) await window.__needData(DATA[id]).catch(()=>{});
+    await P.setScene(id); if(c){ c.classList.remove('faded'); c.style.opacity = '1'; }
+    P.view.pitch = 0.38; P.view.zoom = 1; P.render(); await sleep(2500);
+    const rows = [];
+    for(let v=0; v<VARIANTS.length; v++){
+      const [key, label, apply] = VARIANTS[v];
+      tick(`${NAMES[id]}: ${label} (${v+1} of ${VARIANTS.length})`);
+      reset(); apply(O, P); P.render(); await sleep(1200);
+      await phase(P, 600, true);
+      const FS = window.__fs = { cpu:[], gpu:[], fences:[], waits:0 };
+      const r = await phase(P, 3000, true);
+      window.__fs = null; FS.fences.forEach(([f]) => { try{ gl.deleteSync(f); }catch(e){} });
+      rows.push({ key, label, ...summary(r), cpu:stats(FS.cpu), gpu:stats(FS.gpu), waits:FS.waits, info:P.perfInfo(), dt:r.dt.join(' '), kind:r.kind.join('') });
+    }
+    reset(); out.scenes.push({ scene:id, rows });
+  }
+  $('bBar').style.width = '100%';
+  const head = `<tr><th>Turning, ms per frame</th>${out.scenes.map(sc=>`<th>${NAMES[sc.scene]}</th>`).join('')}<th>GPU</th></tr>`;
+  const body = VARIANTS.map(([key, label]) => `<tr><td>${label}</td>${out.scenes.map(sc=>{ const r = sc.rows.find(x=>x.key===key); return `<td class="${r.mean <= 34 ? 'ok' : 'slow'}">${r.mean.toFixed(0)}</td>`; }).join('')}<td>${out.scenes[0].rows.find(x=>x.key===key).gpu.median.toFixed(0)}</td></tr>`).join('');
+  $('bTable').innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`; $('bTable').hidden = false;
+  const saved = await save(out);
+  $('bState').textContent = saved ? 'Done. Results saved for Claude.' : 'Done.';
+  $('bInfo').textContent = saved ? 'You can close this page now.' : (window.claude ? 'Saving is not available here. Copy the results and paste them in the chat.' : 'Copy the results and send them to whoever asked you to run this.');
+  $('bCopy').hidden = saved; $('bAgain').hidden = false;
+  $('bCopy').onclick = async () => { const t = JSON.stringify(out); try{ await navigator.clipboard.writeText(t); $('bCopy').textContent = 'Copied'; }catch(e){ const s = getSelection(), r = document.createRange(); r.selectNodeContents($('bTable')); s.removeAllRanges(); s.addRange(r); } };
+}
+const MODE = window.__BENCH_MODE || (/[?&]bench=diag\b/.test(location.search) ? 'diag' : 'modes');
+$('bAgain').onclick = () => { session('wc-bench', null); progress = 0; MODE === 'diag' ? diag() : run(true); };
+setTimeout(() => MODE === 'diag' ? diag() : run(false), 1500);
 })();

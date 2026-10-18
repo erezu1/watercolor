@@ -4059,11 +4059,12 @@ let Wf=0,Hf=0,W=0,H=0, rtMain=null, rtGlaze=null, rtRes=null, resCur=0, rtWet=nu
 // the slow-frame guard then lowered the resolution mid-use, restarting the strokes — a visible hitch): a lower painting
 // resolution and ~3/4 of the strokes (faces that get too few strokes grow theirs to cover). ?scale= / ?q= override.
 let intScale = QS.get('scale') ? Number(QS.get('scale')) : LITE ? (PHONE ? 0.40 : 0.55) : PHONE ? 0.48 : (window.devicePixelRatio||1) >= 2.5 ? 0.62 : 0.80;   // the painting's resolution (fine strokes need it)
+let devCap = 2.7e6;                                     // (the screen picture's pixel cap; a test hook lowers it)
 function fit(){
   const r = sheet.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio||1, 3);
   let wf = Math.max(2, Math.round(r.width*dpr)), hf = Math.max(2, Math.round(r.height*dpr));
-  const kf = Math.sqrt(Math.min(1, 2.7e6/(wf*hf))); wf=Math.round(wf*kf); hf=Math.round(hf*kf);
+  const kf = Math.sqrt(Math.min(1, devCap/(wf*hf))); wf=Math.round(wf*kf); hf=Math.round(hf*kf);
   let w = Math.round(wf*intScale), h = Math.round(hf*intScale);
   const ki = Math.sqrt(Math.min(1, 1.4e6/(w*h))); w=Math.round(w*ki); h=Math.round(h*ki);
   if(wf===Wf && hf===Hf && w===W && h===H) return;
@@ -4189,7 +4190,7 @@ function render(dt){
   // 3. paint the strokes, each glaze into its own wash
   const S = strokeMat.uniforms;
   S.tS0.value = wrS.texture[0]; S.tS1.value = wrS.texture[1]; S.tS2.value = wrS.texture[2]; S.tS3.value = wrS.texture[3]; S.tS5.value = wrS.texture[5];
-  for(let g=0; g<4; g++){ renderer.setRenderTarget(rtGlaze[g]); renderer.setClearColor(CLEAR_ZERO, 0); renderer.render(strokeScenes[g], camera); if(__sync) __sync('g'+g); }
+  for(let g=0; g<4; g++){ renderer.setRenderTarget(rtGlaze[g]); renderer.setClearColor(CLEAR_ZERO, 0); if(window.__noStrokes){ renderer.clear(); } else renderer.render(strokeScenes[g], camera); if(__sync) __sync('g'+g); }
   // 4. the washes dry (merge, crisp ragged borders, pigment at the edges)
   const Wm = wetMat.uniforms, wr = 4.2*Math.min(W,H)/700*(1 - 0.5*cfgFor(current).detail);                  // the paint flows ~17 px each way, within its shape
   Wm.tA.value = rtGlaze[1].texture; Wm.tB.value = rtGlaze[2].texture; Wm.tF.value = rtGlaze[3].texture; Wm.uFirst.value = 1; Wm.uStep.value.set(wr/W, 0);   // (tF unused here, but never the target)
@@ -4223,10 +4224,13 @@ function frame(now){
   if(window.__freeze || !sceneReady) return;
   // (OPT.fence) the phone's GPU takes longer than a vsync per frame: queued frames piled up and the browser then stalled
   // for 5-7 vsyncs at once (measured: 15-20% of frames 85-120 ms). So a frame starts only when the last one is done.
+  const FS = window.__fs;                               // (test: the phone diagnostic's frame record — see assets/bench.js)
+  if(FS && FS.fences.length){ const gl = renderer.getContext();
+    while(FS.fences.length && gl.getSyncParameter(FS.fences[0][0], gl.SYNC_STATUS) === gl.SIGNALED){ const [f, t0] = FS.fences.shift(); gl.deleteSync(f); FS.gpu.push(now - t0); } }
   if(gpuFences.length){ const gl = renderer.getContext();
     if(OPT.fence && now - fenceT < 250){
       while(gpuFences.length && gl.getSyncParameter(gpuFences[0], gl.SYNC_STATUS) === gl.SIGNALED) gl.deleteSync(gpuFences.shift());
-      if(gpuFences.length >= OPT.fence) return;
+      if(gpuFences.length >= OPT.fence){ if(FS) FS.waits++; return; }
     } else { gpuFences.forEach(f=>gl.deleteSync(f)); gpuFences = []; } }
   const dt = Math.min(0.05, (now-last)/1000); last = now;
   if(!touched && !reduceMotion && now-born < 16000){        // the opening turn: a turn, a pause (details are painted), a turn ...
@@ -4242,7 +4246,9 @@ function frame(now){
   if(dirty) animUntil = now + 1300;                     // the strokes need a moment to finish growing / drying
   if(now > animUntil) return;                            // nothing changing: the painting stays as it is
   dirty=false;
+  const c0 = FS ? performance.now() : 0;
   render(dt); drawnN++;
+  if(FS){ FS.cpu.push(performance.now() - c0); const gl = renderer.getContext(); FS.fences.push([gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0), now]); }
   if(OPT.fence){ const gl = renderer.getContext(); gpuFences.push(gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)); gl.flush(); fenceT = now; }
   if(perfBox) perfTick(now);
   emaDt += (dt*1000-emaDt)*0.08;
@@ -4300,7 +4306,8 @@ fit(); setMood(0,false); warmShaders();
 { const want = fromAddress(), first = want || PAINTINGS[0].id;
   canvas.classList.add('faded', 'instant'); setTimeout(()=>canvas.classList.remove('instant'), 30);   // (timers, not frames: a hidden tab has none)
   current = null; goTo(first, true); }   // (the first painting straight away: no stand-in pavilion behind the paper, no fade-out to wait for)
-window.__pavilion = { gpuMB:()=>{ const out = {}; let tot = 0;   // (test: MB of each painting's data now on the GPU — resident = its stroke textures are uploaded)
+window.__pavilion = { scale:(v)=>{ intScale = v; fit(); dirty = true; }, devCap:(mp)=>{ devCap = mp*1e6; fit(); dirty = true; },   // (test: painting resolution / screen pixel cap)
+  gpuMB:()=>{ const out = {}; let tot = 0;   // (test: MB of each painting's data now on the GPU — resident = its stroke textures are uploaded)
     Object.keys(strokeMeshes).forEach(k=>{ const M = strokeMeshes[k]; if(!M.attrTex.some(t=>renderer.properties.get(t).__webglTexture)) return;
       const r = gpuResources(k); let b = 0, seen = new Set();
       r.tex.forEach(t=>{ const im = t.image || {}; b += im.data ? im.data.byteLength : (im.width||0)*(im.height||0)*4*(t.generateMipmaps ? 4/3 : 1); });
